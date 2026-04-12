@@ -19,6 +19,7 @@
                 Open Folder
                 <input type="file" id="folderInput" webkitdirectory directory multiple accept="application/pdf" style="display:none">
             </label>
+            <button class="btn-icon" id="settingsBtn" onclick="toggleSettings()" title="Settings">&#9881;</button>
             <button class="btn-icon" onclick="toggleTheme()" title="Toggle theme">&#9728;</button>
             <button class="btn-icon btn-icon-danger" onclick="clearAllResults()" title="Clear all">&#10005;</button>
         </div>
@@ -57,32 +58,27 @@
     </div>
 
     <div class="viewer-toolbar">
-        <button onclick="zoomOut()" title="Zoom Out (Ctrl+-)">-</button>
-        <span class="zoom-level" id="zoomLevel">100%</span>
-        <button onclick="zoomIn()" title="Zoom In (Ctrl++)">+</button>
-        <button onclick="zoomFit()" title="Fit Width">Fit</button>
-        <button onclick="zoomActual()" title="Actual Size">1:1</button>
-        <span class="separator">|</span>
-        <button onclick="prevPage()" title="Previous page">&#8592;</button>
-        <input type="number" class="page-input small" id="pageInput" min="1" placeholder="0" title="Go to page (G)">
-        <span class="dim">/ <span id="pageTotal">0</span></span>
-        <button onclick="nextPage()" title="Next page">&#8594;</button>
-        <span class="separator" id="navSep" style="display:none;">|</span>
-        <span class="nav-group" id="navGroup">
+        <div class="toolbar-section toolbar-zoom">
+            <button onclick="zoomOut()" title="Zoom Out (Ctrl+-)">-</button>
+            <span class="zoom-level" id="zoomLevel">100%</span>
+            <button onclick="zoomIn()" title="Zoom In (Ctrl++)">+</button>
+            <button onclick="zoomFit()" title="Fit Width">Fit</button>
+            <button onclick="zoomActual()" title="Actual Size">1:1</button>
+        </div>
+        <div class="toolbar-section toolbar-page">
+            <button onclick="prevPage()" title="Previous page">&#8592;</button>
+            <input type="number" class="page-input small" id="pageInput" min="1" placeholder="0" title="Go to page (G)">
+            <span class="dim">/ <span id="pageTotal">0</span></span>
+            <button onclick="nextPage()" title="Next page">&#8594;</button>
+        </div>
+        <div class="toolbar-section toolbar-keyword" id="navGroup">
+            <span class="separator" id="navSep" style="display:none;">|</span>
             <select class="keyword-select small" id="keywordSelect" title="Keyword"></select>
             <button onclick="findPrev()" title="Previous match">&#8592;</button>
             <input type="number" class="match-input small" id="matchInput" min="1" placeholder="0" title="Go to match number">
             <span class="dim">/ <span id="matchTotal">0</span></span>
             <button onclick="findNext()" title="Next match">&#8594;</button>
-            <span class="match-counter" id="matchCounter">0 / 0</span>
             <button class="nav-clear" onclick="clearSearch()" title="Clear search">&#10005;</button>
-        </span>
-        <div class="toggle-container">
-            <span class="toggle-label">Animate</span>
-            <label class="toggle-switch">
-                <input type="checkbox" id="animateToggle" checked>
-                <span class="toggle-slider"></span>
-            </label>
         </div>
     </div>
 

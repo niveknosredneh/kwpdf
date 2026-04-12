@@ -1,4 +1,4 @@
-# pdf_scan_js
+ # pdf_scan_js
 
 Scans a folder or zip of PDFs for a large list of keywords and jump between matches.
 
@@ -7,11 +7,17 @@ Scans a folder or zip of PDFs for a large list of keywords and jump between matc
 ## Install
 
 ```
+# clone repo 
 git clone https://codeberg.org/kvnhndrsn/pdf_scan_JS 
 cd pdf_scan_JS/  
+
+# download dependancies 
 curl -O https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js
 curl -O https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
 curl -O https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js
+
+python3 -m http.server 8895 &   # start python server in background
+xdg-open http://localhost:8895  # open page
 ```
 
 ## Authors

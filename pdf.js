@@ -5,6 +5,8 @@ let objectUrls = [];
 let activeKeyword = "";
 let totalMatchesFound = 0;
 let totalDocsFound = 0;
+let processed = 0;
+let totalFiles = 0;
 
 let pdfDoc = null;
 let currentDocUrl = "";
@@ -39,7 +41,6 @@ const loader = document.getElementById('viewerLoader');
 const loaderFilename = document.getElementById('loaderFilename');
 const loaderStatus = document.getElementById('loaderStatus');
 const loaderProgressFill = document.getElementById('loaderProgressFill');
-const matchCounter = document.getElementById('matchCounter');
 const matchTotal = document.getElementById('matchTotal');
 const navGroup = document.getElementById('navGroup');
 const navSep = document.getElementById('navSep');
@@ -51,7 +52,6 @@ const keywordSelect = document.getElementById('keywordSelect');
 const resultsArea = document.getElementById('results');
 const progressBar = document.getElementById('progressBar');
 const sidebar = document.getElementById('sidebar');
-const animateToggle = document.getElementById('animateToggle');
 const heatmapTrack = document.getElementById('heatmapTrack');
 const heatmapThumb = document.getElementById('heatmapThumb');
 
@@ -64,7 +64,85 @@ function toggleTheme() {
         html.setAttribute('data-theme', 'light');
         localStorage.setItem('pdf_theme', 'light');
     }
+    const btn = document.querySelector('#settingsMenu button:first-child');
+    if (btn) btn.textContent = html.getAttribute('data-theme') === 'light' ? 'Dark Mode' : 'Light Mode';
     updateHeatmap();
+}
+
+let settingsOpen = false;
+
+function toggleSettings(e) {
+    if (e) {
+        e.stopPropagation();
+    }
+    settingsOpen = !settingsOpen;
+    
+    const existing = document.getElementById('settingsMenu');
+    if (!settingsOpen) {
+        if (existing) existing.remove();
+        return;
+    }
+    
+    if (existing) existing.remove();
+    
+    const btn = document.getElementById('settingsBtn');
+    const rect = btn.getBoundingClientRect();
+    
+    const menu = document.createElement('div');
+    menu.id = 'settingsMenu';
+    menu.className = 'settings-menu';
+    menu.style.display = 'flex';
+    menu.style.position = 'fixed';
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 4) + 'px';
+    
+    const themeBtn = document.createElement('button');
+    const html = document.documentElement;
+    themeBtn.textContent = html.getAttribute('data-theme') === 'light' ? 'Dark Mode' : 'Light Mode';
+    themeBtn.onclick = toggleTheme;
+    menu.appendChild(themeBtn);
+    
+    const animateBtn = document.createElement('button');
+    animateBtn.className = 'toggle-btn';
+    if (smoothScrollEnabled) animateBtn.classList.add('on');
+    animateBtn.onclick = function() {
+        animateBtn.classList.toggle('on');
+        toggleAnimate();
+    };
+    
+    const label = document.createElement('span');
+    label.className = 'toggle-label';
+    label.textContent = 'Animate PDF Scroll';
+    animateBtn.appendChild(label);
+    
+    const state = document.createElement('span');
+    state.className = 'toggle-state';
+    state.textContent = smoothScrollEnabled ? 'ON' : 'OFF';
+    animateBtn.appendChild(state);
+    
+    menu.appendChild(animateBtn);
+    document.body.appendChild(menu);
+    
+    setTimeout(() => {
+        document.addEventListener('click', closeSettingsOnClickOutside);
+    }, 0);
+}
+
+function closeSettingsOnClickOutside(e) {
+    const menu = document.getElementById('settingsMenu');
+    const btn = document.getElementById('settingsBtn');
+    if (menu && !menu.contains(e.target) && e.target !== btn) {
+        menu.remove();
+        settingsOpen = false;
+        document.removeEventListener('click', closeSettingsOnClickOutside);
+    }
+}
+
+function toggleAnimate() {
+    smoothScrollEnabled = !smoothScrollEnabled;
+    localStorage.setItem('pdf_smooth_scroll', smoothScrollEnabled);
+    const label = document.querySelector('.toggle-state');
+    if (label) label.textContent = smoothScrollEnabled ? 'ON' : 'OFF';
 }
 
 (function() {
@@ -362,6 +440,7 @@ async function computeSearchForQuery(query) {
     if (searchCache[query] !== undefined) return;
 
     const source = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const localRegex = new RegExp(source, 'gi');
     const results = [];
 
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
@@ -377,7 +456,6 @@ async function computeSearchForQuery(query) {
         const textItems = cached.items;
         if (!textItems) continue;
 
-        const localRegex = new RegExp(source, 'gi');
         let match;
 
         while ((match = localRegex.exec(pageText)) !== null) {
@@ -479,7 +557,7 @@ function showSearchResults() {
     if (searchResults.length > 0) {
         navGroup.classList.add('active');
         navSep.style.display = '';
-        matchCounter.textContent = `1 / ${searchResults.length}`;
+        
         matchTotal.textContent = searchResults.length;
         matchInput.max = searchResults.length;
         matchInput.value = 1;
@@ -491,7 +569,7 @@ function showSearchResults() {
     } else {
         navGroup.classList.remove('active');
         navSep.style.display = 'none';
-        matchCounter.textContent = 'No matches';
+        // matchCounter.textContent = 'No matches';
         matchTotal.textContent = '0';
         matchInput.value = '';
         updateSidebarBadge();
@@ -511,7 +589,7 @@ function cycleSearch(query) {
             navGroup.classList.add('active');
             navSep.style.display = '';
             currentMatchIndex = (currentMatchIndex + 1) % searchResults.length;
-            matchCounter.textContent = `${currentMatchIndex + 1} / ${searchResults.length}`;
+            // matchCounter.textContent = `${currentMatchIndex + 1} / ${searchResults.length}`;
             matchTotal.textContent = searchResults.length;
             matchInput.max = searchResults.length;
             matchInput.value = currentMatchIndex + 1;
@@ -522,7 +600,7 @@ function cycleSearch(query) {
         } else {
             navGroup.classList.remove('active');
             navSep.style.display = 'none';
-            matchCounter.textContent = 'No matches';
+
             matchTotal.textContent = '0';
             matchInput.value = '';
             updateHeatmap();
@@ -593,9 +671,15 @@ function updateSidebarBadge() {
         const k = badge.dataset.keyword;
         const total = parseInt(badge.dataset.count) || 0;
         if (k === activeKeyword && currentMatchIndex >= 0) {
-            badge.textContent = `${k}: ${currentMatchIndex + 1}/${total}`;
+            const current = currentMatchIndex + 1;
+            const minWidth = Math.max(2, total.toString().length);
+            const currentStr = current.toString().padStart(minWidth, ' ');
+            const totalStr = total.toString().padStart(minWidth, ' ');
+            badge.textContent = `${k}: ${currentStr}/${totalStr}`;
         } else {
-            badge.textContent = `${k}: ${total}`;
+            const minWidth = Math.max(2, total.toString().length);
+            const totalStr = total.toString().padStart(minWidth, ' ');
+            badge.textContent = `${k}: ${totalStr}`;
         }
     });
 }
@@ -833,7 +917,7 @@ function goToMatch(index) {
     if (searchResults.length === 0) return;
 
     currentMatchIndex = ((index % searchResults.length) + searchResults.length) % searchResults.length;
-    matchCounter.textContent = `${currentMatchIndex + 1} / ${searchResults.length}`;
+    // matchCounter.textContent = `${currentMatchIndex + 1} / ${searchResults.length}`;
     matchInput.value = currentMatchIndex + 1;
     updateSidebarBadge();
 
@@ -903,7 +987,7 @@ function clearSearch() {
     keywordSelect.value = '';
     matchInput.value = '';
     matchTotal.textContent = '0';
-    matchCounter.textContent = '0 / 0';
+    // matchCounter.textContent = '0 / 0';
     updateSidebarBadge();
 }
 
@@ -921,6 +1005,9 @@ function updateHeatmap() {
     const toolbarHeight = document.querySelector('.viewer-toolbar').offsetHeight;
     const containerHeight = document.querySelector('.viewer-container').offsetHeight;
     const scrollableHeight = containerHeight - toolbarHeight;
+    const heatmapTopOffset = 15;
+    const heatmapBottomOffset = 25;
+    const heatmapHeight = scrollableHeight - heatmapTopOffset - heatmapBottomOffset;
 
     if (scrollableHeight <= 0) return;
 
@@ -949,8 +1036,8 @@ function updateHeatmap() {
                 const matchH = Math.max(result.height, 5);
 
                 const progress = matchY / totalContentHeight;
-                const barTop = toolbarHeight + progress * scrollableHeight;
-                const barH = Math.max(2, (matchH / totalContentHeight) * scrollableHeight);
+                const barTop = toolbarHeight + heatmapTopOffset + progress * heatmapHeight;
+                const barH = Math.max(2, (matchH / totalContentHeight) * heatmapHeight);
 
                 const bar = document.createElement('div');
                 bar.className = 'heatmap-bar' + (matchIndex === currentMatchIndex ? ' current-match' : '');
@@ -967,10 +1054,10 @@ function updateHeatmap() {
 
     const maxScroll = viewerScroll.scrollHeight - viewerScroll.clientHeight;
     const scrollRatio = maxScroll > 0 ? viewerScroll.scrollTop / maxScroll : 0;
-    const thumbHeight = Math.max(20, (viewerScroll.clientHeight / viewerScroll.scrollHeight) * scrollableHeight);
-    const thumbTop = toolbarHeight + scrollRatio * (scrollableHeight - thumbHeight);
+    const thumbHeight = Math.max(15, (viewerScroll.clientHeight / viewerScroll.scrollHeight) * heatmapHeight);
+    const thumbTop = toolbarHeight + heatmapTopOffset + scrollRatio * (heatmapHeight - thumbHeight);
 
-    heatmapThumb.style.top = Math.max(toolbarHeight, Math.min(toolbarHeight + scrollableHeight - thumbHeight, thumbTop)) + 'px';
+    heatmapThumb.style.top = Math.max(toolbarHeight + heatmapTopOffset, Math.min(toolbarHeight + heatmapTopOffset + heatmapHeight - thumbHeight, thumbTop)) + 'px';
     heatmapThumb.style.height = thumbHeight + 'px';
 }
 
@@ -980,10 +1067,13 @@ function scrollToHeatmapPosition(e) {
     const toolbarHeight = document.querySelector('.viewer-toolbar').offsetHeight;
     const containerHeight = document.querySelector('.viewer-container').offsetHeight;
     const scrollableHeight = containerHeight - toolbarHeight;
+    const heatmapTopOffset = 15;
+    const heatmapBottomOffset = 25;
+    const heatmapHeight = scrollableHeight - heatmapTopOffset - heatmapBottomOffset;
 
     const rect = document.querySelector('.viewer-container').getBoundingClientRect();
     const clickY = e.clientY - rect.top;
-    const relativeY = Math.max(0, Math.min(1, (clickY - toolbarHeight) / scrollableHeight));
+    const relativeY = Math.max(0, Math.min(1, (clickY - toolbarHeight - heatmapTopOffset) / heatmapHeight));
 
     viewerScroll.scrollTop = relativeY * (viewerScroll.scrollHeight - viewerScroll.clientHeight);
 }
@@ -1046,15 +1136,9 @@ viewerScroll.addEventListener('touchmove', (e) => {
 
 // ========== KEYBOARD SHORTCUTS ==========
 
-animateToggle.addEventListener('change', () => {
-    smoothScrollEnabled = animateToggle.checked;
-    localStorage.setItem('pdf_smooth_scroll', smoothScrollEnabled);
-});
-
 const savedSmooth = localStorage.getItem('pdf_smooth_scroll');
 if (savedSmooth !== null) {
     smoothScrollEnabled = savedSmooth === 'true';
-    animateToggle.checked = smoothScrollEnabled;
 }
 
 viewerScroll.addEventListener('wheel', (e) => {
@@ -1150,80 +1234,93 @@ async function processFiles(files) {
     resultsArea.innerHTML = `<p class="scanning-msg">Scanning ${files.length} documents...</p>`;
     progressBar.style.width = '0%';
 
-    const combinedRegex = new RegExp(KEYWORDS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
-    let matchedInSession = 0;
+    processed = 0;
+    totalFiles = files.length;
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const url = URL.createObjectURL(file);
         objectUrls.push(url);
 
-        if (resultsArea.querySelector('.scanning-msg')) {
-            resultsArea.querySelector('.scanning-msg').textContent = `Scanning ${i + 1} / ${files.length}: ${file.name}`;
-        }
+        const arrayBuffer = await file.arrayBuffer();
+        
+        await extractPdfText(arrayBuffer, file.name, url);
+        
+        updateProgressMainThread();
+    }
+}
 
-        try {
-            const pdf = await pdfjsLib.getDocument({ url, verbosity: 0 }).promise;
-            let text = "";
-            const pageTextData = [];
-
-            for (let p = 1; p <= pdf.numPages; p++) {
-                const page = await pdf.getPage(p);
-                const content = await page.getTextContent();
-                const vp = page.getViewport({ scale: 1.0 });
-
-                let pageText = '';
-                for (const item of content.items) {
-                    pageText += item.str;
-                }
-                pageTextData.push({ text: pageText, viewport: vp });
-                text += pageText + " ";
-            }
-
-            docTextCache[url] = { totalPages: pdf.numPages, pages: pageTextData, fileName: file.name };
-
-            const matches = text.match(combinedRegex) || [];
-            const counts = {};
-            let fileTotalMatches = 0;
-
-            matches.forEach(match => {
-                const lowerMatch = match.toLowerCase();
-                const originalKey = KEYWORDS.find(k => k.toLowerCase() === lowerMatch) || lowerMatch;
-                counts[originalKey] = (counts[originalKey] || 0) + 1;
-                fileTotalMatches++;
-            });
-
-            totalDocsFound++;
+async function extractPdfText(arrayBuffer, fileName, id) {
+    try {
+        const fakeDoc = {
+            createElement: name => name === 'canvas' ? new OffscreenCanvas(1, 1) : null,
+            fonts: {}
+        };
+        
+        const pdfData = new Uint8Array(arrayBuffer);
+        const pdf = await pdfjsLib.getDocument({ data: pdfData, ownerDocument: fakeDoc }).promise;
+        
+        const pageTextData = [];
+        
+        for (let p = 1; p <= pdf.numPages; p++) {
+            const page = await pdf.getPage(p);
+            const content = await page.getTextContent();
+            const vp = page.getViewport({ scale: 1.0 });
             
-            if (fileTotalMatches > 0) {
-                if (matchedInSession === 0 && resultsArea.querySelector('.scanning-msg')) {
-                    resultsArea.innerHTML = "";
-                }
-                renderCard(file.name, counts, url);
-                totalMatchesFound += fileTotalMatches;
-                matchedInSession++;
-                updateStats();
-            } else {
-                renderNoMatchCard(file.name, url);
+            let pageText = '';
+            for (const item of content.items) {
+                pageText += item.str;
             }
-        } catch (err) {
-            console.error("Error scanning:", file.name, err);
+            pageTextData.push({ text: pageText, viewport: { width: vp.width, height: vp.height } });
         }
-        progressBar.style.width = `${Math.round(((i + 1) / files.length) * 100)}%`;
+        
+        const combinedRegex = new RegExp(KEYWORDS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+        const counts = {};
+        let totalMatches = 0;
+        
+        for (const pageData of pageTextData) {
+            const matches = pageData.text.match(combinedRegex) || [];
+            for (const match of matches) {
+                const lower = match.toLowerCase();
+                const key = KEYWORDS.find(k => k.toLowerCase() === lower) || lower;
+                counts[key] = (counts[key] || 0) + 1;
+                totalMatches++;
+            }
+        }
+        
+        if (totalMatches > 0) {
+            docTextCache[id] = { totalPages: pdf.numPages, pages: pageTextData, fileName };
+            renderCard(fileName, counts, id);
+            totalMatchesFound += totalMatches;
+            totalDocsFound++;
+            updateStats();
+        } else {
+            renderNoMatchCard(fileName, id);
+        }
+    } catch (err) {
+        console.error('Error processing PDF:', err);
     }
+}
 
-    if (resultsArea.querySelector('.scanning-msg')) {
-        resultsArea.querySelector('.scanning-msg').remove();
-    }
-    if (matchedInSession === 0 && resultsArea.innerHTML === "") {
-        resultsArea.innerHTML = "<p class='status-msg'>No matches found in the selected folder.</p>";
-    } else if (matchedInSession > 0) {
-        const summary = document.createElement('p');
-        summary.className = 'status-msg';
-        summary.style.marginTop = '12px';
-        summary.style.color = 'var(--green-light)';
-        summary.textContent = `Done — ${matchedInSession} document${matchedInSession > 1 ? 's' : ''} with matches`;
-        resultsArea.appendChild(summary);
+function updateProgressMainThread() {
+    processed++;
+    progressBar.style.width = `${Math.round((processed / totalFiles) * 100)}%`;
+    
+    if (processed === totalFiles) {
+        if (resultsArea.querySelector('.scanning-msg')) {
+            resultsArea.querySelector('.scanning-msg').remove();
+        }
+        
+        if (totalDocsFound === 0) {
+            resultsArea.innerHTML = "<p class='status-msg'>No matches found in the selected folder.</p>";
+        } else {
+            const summary = document.createElement('p');
+            summary.className = 'status-msg';
+            summary.style.marginTop = '12px';
+            summary.style.color = 'var(--green-light)';
+            summary.textContent = `Done — ${totalDocsFound} document${totalDocsFound !== 1 ? 's' : ''} with matches`;
+            resultsArea.appendChild(summary);
+        }
     }
 }
 
@@ -1249,11 +1346,19 @@ async function handleDrop(e) {
     }
 }
 
+let sidebarDragging = false;
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(name => {
     sidebar.addEventListener(name, (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (name === 'dragover') sidebar.style.background = "var(--grey-800)";
+        if (name === 'dragenter') {
+            sidebarDragging = true;
+            sidebar.classList.add('drag-over');
+        }
+        if ((name === 'dragleave' && !sidebar.contains(e.relatedTarget)) || name === 'drop') {
+            sidebar.classList.remove('drag-over');
+            sidebarDragging = false;
+        }
     }, false);
 });
 
