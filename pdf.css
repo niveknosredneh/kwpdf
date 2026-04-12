@@ -316,7 +316,7 @@ body {
 .viewer-toolbar .match-counter { font-size: 0.75rem; color: var(--green); font-weight: 600; font-family: monospace; min-width: 60px; text-align: center; }
 
 .page-input, .match-input {
-    width: 42px;
+    width: 62px;
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.15);
     color: white;

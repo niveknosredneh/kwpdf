@@ -1,4 +1,4 @@
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.js';
 
 // State
 let objectUrls = [];
@@ -159,7 +159,7 @@ async function loadPDF(fileUrl, keyword = "") {
                 textPageCache[i + 1] = cached.pages[i];
             }
             loaderProgressFill.style.width = '80%';
-            precomputeAllSearches();
+            await precomputeAllSearches();
         }
 
         loaderProgressFill.style.width = '100%';
@@ -306,6 +306,29 @@ async function renderPageNow(pageNum, forceScale = null) {
     canvas.style.height = displayHeight + 'px';
     canvas.dataset.scale = renderScale;
 
+    const textContent = await page.getTextContent();
+    
+    const vp = page.getViewport({ scale: 1.0 });
+    let pageText = '';
+    for (const item of textContent.items) {
+        pageText += item.str;
+    }
+    textPageCache[pageNum] = { text: pageText, viewport: vp };
+    pageHeights[pageNum] = vp.height;
+    
+    const textLayerDiv = document.createElement('div');
+    textLayerDiv.className = 'textLayer';
+    textLayerDiv.style.width = displayWidth + 'px';
+    textLayerDiv.style.height = displayHeight + 'px';
+    
+    const textViewport = page.getViewport({ scale: renderScale });
+    pdfjsLib.renderTextLayer({
+        textContent: textContent,
+        container: textLayerDiv,
+        viewport: textViewport,
+        textDivs: []
+    });
+    
     await page.render({ canvasContext: ctx, viewport: viewport }).promise;
     
     const existingCanvas = el.querySelector('canvas');
@@ -313,19 +336,6 @@ async function renderPageNow(pageNum, forceScale = null) {
         existingCanvas.remove();
     }
     el.appendChild(canvas);
-
-    const textLayerDiv = document.createElement('div');
-    textLayerDiv.className = 'textLayer';
-    textLayerDiv.style.width = displayWidth + 'px';
-    textLayerDiv.style.height = displayHeight + 'px';
-
-    const textContent = await page.getTextContent();
-    pdfjsLib.renderTextLayer({
-        textContent: textContent,
-        container: textLayerDiv,
-        viewport: page.getViewport({ scale: renderScale }),
-        textDivs: []
-    });
 
     const existingTextLayer = el.querySelector('.textLayer');
     if (existingTextLayer) {
@@ -340,15 +350,15 @@ async function renderPageNow(pageNum, forceScale = null) {
 
 // ========== SEARCH ==========
 
-function precomputeAllSearches() {
+async function precomputeAllSearches() {
     for (const keyword of KEYWORDS) {
         if (searchCache[keyword] !== undefined) continue;
-        computeSearchForQuery(keyword);
+        await computeSearchForQuery(keyword);
     }
     populateKeywordSelect();
 }
 
-function computeSearchForQuery(query) {
+async function computeSearchForQuery(query) {
     if (searchCache[query] !== undefined) return;
 
     const source = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -359,8 +369,13 @@ function computeSearchForQuery(query) {
         if (!cached) continue;
 
         const pageText = cached.text;
-        const textItems = cached.items;
         const viewport = cached.viewport;
+
+        if (!cached.items) {
+            await fetchPageItems(pageNum);
+        }
+        const textItems = cached.items;
+        if (!textItems) continue;
 
         const localRegex = new RegExp(source, 'gi');
         let match;
@@ -392,14 +407,12 @@ function computeSearchForQuery(query) {
             }
 
             if (startItem) {
-                // Proportional x offset within the startItem
                 const startCharFrac = startItem.text.length > 0
                     ? (matchStart - startItemCharStart) / startItem.text.length : 0;
                 const sx = startItem.transform[4] + startCharFrac * startItem.width;
 
                 const sy = viewport.height - (startItem.transform[5] + startItem.height);
 
-                // Proportional x end within the endItem (or startItem if same)
                 const ei = endItem || startItem;
                 const eiCharStart = endItem ? endItemCharStart : startItemCharStart;
                 const endCharFrac = ei.text.length > 0
@@ -420,6 +433,26 @@ function computeSearchForQuery(query) {
     searchCache[query] = results;
 }
 
+async function fetchPageItems(pageNum) {
+    if (!pdfDoc) return null;
+    const cached = textPageCache[pageNum];
+    if (!cached || cached.items) return cached?.items;
+
+    const page = await pdfDoc.getPage(pageNum);
+    const content = await page.getTextContent();
+    const items = [];
+    for (const item of content.items) {
+        items.push({
+            text: item.str,
+            transform: item.transform,
+            width: item.width,
+            height: item.height
+        });
+    }
+    cached.items = items;
+    return items;
+}
+
 async function performSearch(query) {
     if (!pdfDoc || !query) return;
 
@@ -436,7 +469,7 @@ async function performSearch(query) {
     clearHighlights();
     searchResults = [];
 
-    computeSearchForQuery(query);
+    await computeSearchForQuery(query);
     searchResults = searchCache[query] || [];
 
     showSearchResults();
@@ -570,71 +603,49 @@ function updateSidebarBadge() {
 // ========== ZOOM ==========
 
 function setZoom(newScale) {
-    const oldScale = currentScale;
     const clampedScale = Math.max(0.5, Math.min(4.0, newScale));
+    if (clampedScale === currentScale) return;
 
-    // --- Anchor: find what document-Y is at the center of the viewport ---
-    // so we can restore it after resizing pages
-    const centerPixel = viewerScroll.scrollTop + viewerScroll.clientHeight / 2;
-    let totalOldHeight = 0;
-    for (let i = 1; i <= totalPages; i++) {
-        totalOldHeight += (pageHeights[i] || 800) * oldScale + 32;
-    }
-    const anchorFraction = totalOldHeight > 0 ? centerPixel / totalOldHeight : 0;
-    // ---
+    const oldScrollTop = viewerScroll.scrollTop;
+    const oldScrollHeight = viewerScroll.scrollHeight;
 
     currentScale = clampedScale;
     updateZoomDisplay();
 
-    // Resize all page elements to new scale without re-rendering immediately
     for (let i = 1; i <= totalPages; i++) {
         const el = document.getElementById('page-' + i);
         if (!el) continue;
-
         const baseH = pageHeights[i] || 800;
         const cached = textPageCache[i];
         const baseW = cached ? cached.viewport.width : 600;
-        const displayW = baseW * currentScale;
-        const displayH = baseH * currentScale;
-
-        el.style.width = displayW + 'px';
-        el.style.height = displayH + 'px';
-
-        // CSS-scale existing canvas/textLayer instantly (blurry but fast)
+        el.style.width = (baseW * currentScale) + 'px';
+        el.style.height = (baseH * currentScale) + 'px';
         const canvas = el.querySelector('canvas');
         if (canvas) {
-            canvas.style.width = displayW + 'px';
-            canvas.style.height = displayH + 'px';
+            canvas.style.width = (baseW * currentScale) + 'px';
+            canvas.style.height = (baseH * currentScale) + 'px';
         }
         const textLayer = el.querySelector('.textLayer');
         if (textLayer) {
-            textLayer.style.width = displayW + 'px';
-            textLayer.style.height = displayH + 'px';
+            textLayer.style.width = (baseW * currentScale) + 'px';
+            textLayer.style.height = (baseH * currentScale) + 'px';
         }
     }
 
-    // Mark all pages as needing re-render at new scale
     renderedPages.clear();
     renderedScales = {};
 
-    // --- Restore scroll after DOM updates ---
     requestAnimationFrame(() => {
-        let totalNewHeight = 0;
-        for (let i = 1; i <= totalPages; i++) {
-            totalNewHeight += (pageHeights[i] || 800) * currentScale + 32;
-        }
-        viewerScroll.scrollTop = anchorFraction * totalNewHeight - viewerScroll.clientHeight / 2;
+        const newScrollHeight = viewerScroll.scrollHeight;
+        const anchorFraction = oldScrollHeight > 0 ? oldScrollTop / oldScrollHeight : 0;
+        const newScrollTop = anchorFraction * newScrollHeight;
+        viewerScroll.scrollTop = newScrollTop;
 
-        // Clear highlights (positions change with scale)
         clearHighlights();
-
-        // Reconnect observer
         if (pageObserver) {
             pageObserver.disconnect();
             setupPageObserver();
         }
-
-        // Re-render highlights at new scale
         if (searchResults.length > 0) {
             renderAllHighlights();
         }
@@ -1162,17 +1173,10 @@ async function processFiles(files) {
                 const vp = page.getViewport({ scale: 1.0 });
 
                 let pageText = '';
-                let textItems = [];
                 for (const item of content.items) {
-                    textItems.push({
-                        text: item.str,
-                        transform: item.transform,
-                        width: item.width,
-                        height: item.height
-                    });
                     pageText += item.str;
                 }
-                pageTextData.push({ text: pageText, items: textItems, viewport: vp });
+                pageTextData.push({ text: pageText, viewport: vp });
                 text += pageText + " ";
             }
 
