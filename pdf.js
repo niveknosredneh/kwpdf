@@ -52,7 +52,7 @@ const keywordSelect = document.getElementById('keywordSelect');
 const resultsArea = document.getElementById('results');
 const progressBar = document.getElementById('progressBar');
 const sidebar = document.getElementById('sidebar');
-const heatmapTrack = document.getElementById('heatmapTrack');
+const statusBar = document.getElementById('statusBar');
 
 function toggleTheme() {
     const html = document.documentElement;
@@ -65,7 +65,6 @@ function toggleTheme() {
     }
     const btn = document.querySelector('#settingsMenu button:first-child');
     if (btn) btn.textContent = html.getAttribute('data-theme') === 'light' ? 'Dark Mode' : 'Light Mode';
-    updateHeatmap();
 }
 
 let settingsOpen = false;
@@ -159,6 +158,7 @@ function updateStats() {
 function clearAllResults() {
     if (confirm("Clear all scanned results and start fresh?")) {
         resultsArea.innerHTML = '<h1 class="status-msg">&#10548;</h1><h1 class="status-msg">Drop a folder to begin scanning</h1>';
+        statusBar.textContent = '';
         objectUrls.forEach(url => URL.revokeObjectURL(url));
         objectUrls = [];
         totalMatchesFound = 0;
@@ -445,6 +445,8 @@ async function precomputeAllSearches() {
 
         let match;
         while ((match = combinedRegex.exec(pageText)) !== null) {
+            if (match[0].length < 3) continue;
+            if (!/[a-zA-Z]/.test(match[0])) continue;
             const lower = match[0].toLowerCase();
             const canonical = KEYWORDS.find(k => k.toLowerCase() === lower) || lower;
             
@@ -532,6 +534,8 @@ async function computeSearchForQuery(query) {
         let match;
 
         while ((match = localRegex.exec(pageText)) !== null) {
+            if (match[0].length < 3) continue;
+            if (!/[a-zA-Z]/.test(match[0])) continue;
             const matchStart = match.index;
             const matchEnd   = match.index + match[0].length;
 
@@ -644,7 +648,6 @@ function showSearchResults() {
         matchInput.max = searchResults.length;
         matchInput.value = 1;
         renderAllHighlights();
-        updateHeatmap();
         populateKeywordSelect();
         updateSidebarBadge();
         goToMatch(0);
@@ -655,7 +658,6 @@ function showSearchResults() {
         matchTotal.textContent = '0';
         matchInput.value = '';
         updateSidebarBadge();
-        updateHeatmap();
         populateKeywordSelect();
     }
 }
@@ -675,7 +677,6 @@ function cycleSearch(query) {
             matchInput.max = searchResults.length;
             matchInput.value = currentMatchIndex + 1;
             renderAllHighlights();
-            updateHeatmap();
             populateKeywordSelect();
             goToMatch(currentMatchIndex);
         } else {
@@ -684,7 +685,6 @@ function cycleSearch(query) {
 
             matchTotal.textContent = '0';
             matchInput.value = '';
-            updateHeatmap();
             populateKeywordSelect();
         }
         return;
@@ -819,7 +819,6 @@ function setZoom(newScale) {
         if (searchResults.length > 0) {
             renderAllHighlights();
         }
-        updateHeatmap();
     });
 }
 
@@ -993,8 +992,6 @@ viewerScroll.addEventListener('scroll', () => {
         }
         offsetY += h + 32;
     }
-
-    updateHeatmap();
 });
 
 // ========== MATCH NAVIGATION ==========
@@ -1068,70 +1065,10 @@ function clearSearch() {
     navGroup.classList.remove('active');
     navSep.style.display = 'none';
     clearHighlights();
-    updateHeatmap();
     keywordSelect.value = '';
     matchInput.value = '';
     matchTotal.textContent = '0';
     updateSidebarBadge();
-}
-
-// ========== HEATMAP ==========
-
-function updateHeatmap() {
-    if (searchResults.length === 0 || !pdfDoc) {
-        heatmapTrack.innerHTML = '';
-        return;
-    }
-
-    const toolbarHeight = document.querySelector('.viewer-toolbar').offsetHeight;
-    const containerHeight = document.querySelector('.viewer-container').offsetHeight;
-    const scrollableHeight = containerHeight - toolbarHeight;
-    const heatmapTopOffset = -5;
-    const heatmapBottomOffset = 45;
-    const heatmapHeight = scrollableHeight - heatmapTopOffset - heatmapBottomOffset;
-
-    if (scrollableHeight <= 0) return;
-
-    let totalContentHeight = 0;
-    for (let i = 1; i <= totalPages; i++) {
-        totalContentHeight += (pageHeights[i] || 800) + 32;
-    }
-
-    heatmapTrack.innerHTML = '';
-
-    const matchPositions = {};
-    searchResults.forEach((result, index) => {
-        if (!matchPositions[result.page]) matchPositions[result.page] = [];
-        matchPositions[result.page].push(index);
-    });
-
-    let offsetY = 0;
-    for (let i = 1; i <= totalPages; i++) {
-        const pageHeight = pageHeights[i] || 800;
-        const pageTop = offsetY;
-
-        if (matchPositions[i]) {
-            matchPositions[i].forEach(matchIndex => {
-                const result = searchResults[matchIndex];
-                const matchY = pageTop + result.y;
-                const matchH = Math.max(result.height, 5);
-
-                const progress = matchY / totalContentHeight;
-                const barTop = toolbarHeight + heatmapTopOffset + progress * heatmapHeight;
-                const barH = Math.max(2, (matchH / totalContentHeight) * heatmapHeight);
-
-                const bar = document.createElement('div');
-                bar.className = 'heatmap-bar' + (matchIndex === currentMatchIndex ? ' current-match' : '');
-
-                bar.style.top = barTop + 'px';
-                bar.style.height = barH + 'px';
-
-                heatmapTrack.appendChild(bar);
-            });
-        }
-
-        offsetY += pageHeight + 32;
-    }
 }
 
 // ========== MOBILE (disabled) ==========
@@ -1268,7 +1205,13 @@ function setActiveCard(card) {
 async function processFiles(files) {
     if (files.length === 0) return;
 
-    resultsArea.innerHTML = `<p class="scanning-msg">Scanning ${files.length} documents...</p>`;
+    const viewerMsg = document.getElementById('viewerDropMsg');
+    if (viewerMsg) viewerMsg.style.display = 'none';
+    
+    const statusMsgs = resultsArea.querySelectorAll('.status-msg');
+    statusMsgs.forEach(el => el.remove());
+
+    statusBar.textContent = `Scanning ${files.length} documents...`;
     progressBar.style.width = '0%';
 
     processed = 0;
@@ -1322,24 +1265,29 @@ async function extractPdfText(arrayBuffer, fileName, id) {
     let totalMatches = 0;
     
     for (const pageData of pageTextData) {
-        const matches = pageData.text.match(combinedRegex) || [];
-        for (const match of matches) {
-            const lower = match.toLowerCase();
+        const text = pageData.text;
+        let match;
+        const regex = new RegExp(combinedRegex.source, 'gi');
+        while ((match = regex.exec(text)) !== null) {
+            if (match[0].length < 3) continue;
+            if (!/[a-zA-Z]/.test(match[0])) continue;
+            const lower = match[0].toLowerCase();
             const key = keywords.find(k => k.toLowerCase() === lower) || lower;
             counts[key] = (counts[key] || 0) + 1;
             totalMatches++;
         }
     }
         
+        docTextCache[id] = { totalPages: pdf.numPages, pages: pageTextData, fileName };
+        totalDocsFound++;
+        
         if (totalMatches > 0) {
-            docTextCache[id] = { totalPages: pdf.numPages, pages: pageTextData, fileName };
             renderCard(fileName, counts, id);
             totalMatchesFound += totalMatches;
-            totalDocsFound++;
-            updateStats();
         } else {
             renderNoMatchCard(fileName, id);
         }
+        updateStats();
     } catch (err) {
         console.error('Error processing PDF:', err);
     }
@@ -1350,19 +1298,10 @@ function updateProgressMainThread() {
     progressBar.style.width = `${Math.round((processed / totalFiles) * 100)}%`;
     
     if (processed === totalFiles) {
-        if (resultsArea.querySelector('.scanning-msg')) {
-            resultsArea.querySelector('.scanning-msg').remove();
-        }
-        
-        if (totalDocsFound === 0) {
-            resultsArea.innerHTML = "<p class='status-msg'>No matches found in the selected folder.</p>";
+        if (totalMatchesFound === 0) {
+            statusBar.textContent = "No matches found";
         } else {
-            const summary = document.createElement('p');
-            summary.className = 'status-msg';
-            summary.style.marginTop = '12px';
-            summary.style.color = 'var(--green-light)';
-            summary.textContent = `Done — ${totalDocsFound} document${totalDocsFound !== 1 ? 's' : ''} with matches`;
-            resultsArea.appendChild(summary);
+            statusBar.textContent = `${totalMatchesFound} matches across ${totalDocsFound} document${totalDocsFound !== 1 ? 's' : ''}`;
         }
     }
 }
@@ -1499,7 +1438,10 @@ keywordListSelect.addEventListener('change', () => {
 });
 
 async function rescanAllDocuments() {
-    resultsArea.innerHTML = '<p class="scanning-msg">Rescanning documents...</p>';
+    const viewerMsg = document.getElementById('viewerDropMsg');
+    if (viewerMsg) viewerMsg.style.display = 'none';
+    
+    statusBar.textContent = 'Rescanning documents...';
     progressBar.style.width = '0%';
     
     totalMatchesFound = 0;
@@ -1519,13 +1461,16 @@ async function rescanAllDocuments() {
         
         for (let p = 0; p < cached.pages.length; p++) {
             const text = cached.pages[p].text;
-            const matches = text.match(combinedRegex) || [];
-            matches.forEach(match => {
-                const lowerMatch = match.toLowerCase();
+            let match;
+            const regex = new RegExp(combinedRegex.source, 'gi');
+            while ((match = regex.exec(text)) !== null) {
+                if (match[0].length < 3) continue;
+                if (!/[a-zA-Z]/.test(match[0])) continue;
+                const lowerMatch = match[0].toLowerCase();
                 const originalKey = KEYWORDS.find(k => k.toLowerCase() === lowerMatch) || lowerMatch;
                 counts[originalKey] = (counts[originalKey] || 0) + 1;
                 fileTotalMatches++;
-            });
+            }
         }
         
         const fileName = cached.fileName || `Document ${i + 1}`;
@@ -1543,18 +1488,13 @@ async function rescanAllDocuments() {
         progressBar.style.width = pct + '%';
     }
     
-    if (resultsArea.querySelector('.scanning-msg')) {
-        resultsArea.querySelector('.scanning-msg').remove();
-    }
-    
     updateStats();
     
-    const summary = document.createElement('p');
-    summary.className = 'status-msg';
-    summary.style.marginTop = '12px';
-    summary.style.color = 'var(--green-light)';
-    summary.textContent = `Done — ${matchedInSession} document${matchedInSession !== 1 ? 's' : ''} with matches`;
-    resultsArea.appendChild(summary);
+    if (totalMatchesFound === 0) {
+        statusBar.textContent = "No matches found";
+    } else {
+        statusBar.textContent = `${totalMatchesFound} matches across ${totalDocsFound} document${totalDocsFound !== 1 ? 's' : ''}`;
+    }
 }
 
 async function rescanWithNewKeywords() {
@@ -1567,12 +1507,16 @@ async function rescanWithNewKeywords() {
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         const cached = textPageCache[pageNum];
         if (!cached) continue;
-        const matches = cached.text.match(combinedRegex) || [];
-        totalMatches += matches.length;
-        matches.forEach(m => {
-            const key = KEYWORDS.find(k => k.toLowerCase() === m.toLowerCase()) || m.toLowerCase();
+        const text = cached.text;
+        let match;
+        const regex = new RegExp(combinedRegex.source, 'gi');
+        while ((match = regex.exec(text)) !== null) {
+            if (match[0].length < 3) continue;
+            if (!/[a-zA-Z]/.test(match[0])) continue;
+            totalMatches++;
+            const key = KEYWORDS.find(k => k.toLowerCase() === match[0].toLowerCase()) || match[0].toLowerCase();
             docCounts[key] = (docCounts[key] || 0) + 1;
-        });
+        }
     }
 
     const activeCard = document.querySelector('.doc-card.active');

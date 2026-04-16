@@ -5,7 +5,7 @@
     <script src="pdf.min.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=no">
-    <title>PDF Scanner Pro</title>
+    <title>PDF Scanner</title>
     <link rel="stylesheet" href="pdf.css">
     <script src="keywords.js"></script>
 </head>
@@ -30,6 +30,7 @@
         <div class="progress-bar-wrap">
             <div class="progress-bar" id="progressBar"></div>
         </div>
+        <div class="status-bar" id="statusBar"></div>
     </div>
 
     
@@ -73,6 +74,7 @@
     </div>
 
     <div class="viewer-scroll" id="viewerScroll">
+        <div id="viewerDropMsg">&#10548; Drop a folder to begin scanning</div>
         <div id="viewerLoader">
             <div class="spinner"></div>
             <div class="loader-details">
@@ -83,7 +85,6 @@
         </div>
         <div id="pdfViewer"></div>
     </div>
-    <div class="heatmap-track" id="heatmapTrack"></div>
 </div>
 
 <div id="keywordManager">
