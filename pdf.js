@@ -153,6 +153,11 @@ function toggleAnimate() {
 // ========== SIDEBAR / SCANNING ==========
 
 function updateStats() {
+    if (totalMatchesFound > 0) {
+        statusBar.textContent = `${totalMatchesFound} matches across ${totalDocsFound} document${totalDocsFound !== 1 ? 's' : ''}`;
+    } else if (totalDocsFound > 0) {
+        statusBar.textContent = `${totalDocsFound} document${totalDocsFound !== 1 ? 's' : ''} scanned`;
+    }
 }
 
 function clearAllResults() {
@@ -1290,6 +1295,7 @@ async function extractPdfText(arrayBuffer, fileName, id) {
         updateStats();
     } catch (err) {
         console.error('Error processing PDF:', err);
+        updateProgressMainThread();
     }
 }
 
@@ -1323,7 +1329,15 @@ async function handleDrop(e) {
             await traverseFileTree(entry, filesToProcess);
         }
     }
-    if (filesToProcess.length > 0) {
+    
+    if (filesToProcess.length === 0) {
+        const viewerMsg = document.getElementById('viewerDropMsg');
+        if (viewerMsg) viewerMsg.style.display = 'none';
+        const statusMsgs = resultsArea.querySelectorAll('.status-msg');
+        statusMsgs.forEach(el => el.remove());
+        statusBar.textContent = 'No PDF files found in folder';
+        progressBar.style.width = '0%';
+    } else {
         processFiles(filesToProcess);
     }
 }

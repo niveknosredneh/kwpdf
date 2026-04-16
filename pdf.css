@@ -288,7 +288,6 @@ body {
 .badge:hover { background: var(--green); color: white; border-color: var(--green); transform: translateY(-1px); }
 
 .status-msg { text-align: center; color: var(--grey-500); margin-top: 60px; }
-.scanning-msg { color: var(--grey-400); font-style: italic; padding: 20px; text-align: center; }
 
 #resizer {
     width: 6px; cursor: col-resize; background: var(--grey-200); transition: background 0.2s;
