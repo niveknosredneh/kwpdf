@@ -7,7 +7,15 @@ function getKeywordRegex(keywords) {
     if (!keywords) keywords = window.KEYWORDS || [];
     if (!Array.isArray(keywords)) keywords = [];
     
-    if (cachedKeywordRegex && cachedKeywordList === keywords) {
+    const keywordsJson = JSON.stringify(keywords);
+    
+    if (cachedKeywordRegex && cachedKeywordList === keywordsJson) {
+        return cachedKeywordRegex;
+    }
+    
+    if (keywords.length === 0) {
+        cachedKeywordRegex = null;
+        cachedKeywordList = keywordsJson;
         return cachedKeywordRegex;
     }
     
@@ -15,13 +23,8 @@ function getKeywordRegex(keywords) {
         .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
         .join('|');
     
-    try {
-        cachedKeywordRegex = new RegExp(`\\b(${pattern})\\b`, 'gi');
-    } catch (e) {
-        cachedKeywordRegex = new RegExp(`(${pattern})`, 'gi');
-    }
-    
-    cachedKeywordList = keywords;
+    cachedKeywordRegex = new RegExp(`\\b(${pattern})\\b`, 'gi');
+    cachedKeywordList = keywordsJson;
     return cachedKeywordRegex;
 }
 
@@ -48,11 +51,14 @@ let searchResults = [];
 let currentMatchIndex = -1;
 let searchCache = {};
 
+let currentLayout = localStorage.getItem('pdf_layout') || 'cards';
+let expandedTreeItems = new Set();
+let docDataCache = {}; // url -> { name, counts, url }
+
 let pageHeights = {};
 let renderedPages = new Set();
 let renderedScales = {};
-let renderTask = null;
-
+let zoomRenderTask = null;
 let textPageCache = {};
 let docTextCache = {};
 
@@ -60,10 +66,275 @@ let smoothScrollEnabled = false;
 let isNavigating = false;
 let ocrScanning = false;
 
+let heatmapContainer = null;
+
 let bgRenderRunning = false;
 let bgRenderQueue = [];
 
-let zoomRenderTask = null;
+// ========== CUSTOM SEARCH OVERLAY ==========
+
+let searchOverlay = null;
+let searchOverlayInput = null;
+let searchOverlayResults = null;
+let searchOverlayClose = null;
+let customSearchResults = [];
+let customSearchIndex = 0;
+
+function initSearchOverlay() {
+    const viewerContainer = document.querySelector('.viewer-container');
+    const overlay = document.createElement('div');
+    overlay.id = 'searchOverlay';
+    overlay.className = 'search-overlay';
+    overlay.innerHTML = `
+        <input type="text" id="searchOverlayInput" placeholder="Search PDF... (Esc to close)" autocomplete="off">
+        <span class="search-overlay-results" id="searchOverlayResults">0 / 0</span>
+        <button class="search-overlay-btn" id="searchOverlayPrev" title="Previous (Shift+F3)">&#8592;</button>
+        <button class="search-overlay-btn" id="searchOverlayNext" title="Next (F3)">&#8594;</button>
+        <button class="search-overlay-btn search-overlay-close" id="searchOverlayClose" title="Close (Esc)">&#10005;</button>
+    `;
+    viewerContainer.appendChild(overlay);
+    searchOverlay = overlay;
+    searchOverlayInput = document.getElementById('searchOverlayInput');
+    searchOverlayResults = document.getElementById('searchOverlayResults');
+    searchOverlayClose = document.getElementById('searchOverlayClose');
+    document.getElementById('searchOverlayPrev').addEventListener('click', customFindPrev);
+    document.getElementById('searchOverlayNext').addEventListener('click', customFindNext);
+    searchOverlayClose.addEventListener('click', closeSearchOverlay);
+    searchOverlayInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (e.shiftKey) {
+                customFindPrev();
+            } else {
+                customFindNext();
+            }
+        }
+        if (e.key === 'Escape') {
+            closeSearchOverlay();
+        }
+    });
+    searchOverlayInput.addEventListener('input', () => {
+        performCustomSearch(searchOverlayInput.value);
+    });
+}
+
+let heatmapStyleInjected = false;
+
+function updateHeatmap() {
+    let existing = document.getElementById('heatmapContainer');
+    if (!existing) {
+        const style = document.createElement('style');
+        style.id = 'heatmapStyle';
+        style.textContent = '.hm{position:absolute;left:2px;width:10px;height:3px;background:#6b9e3a;border-radius:1px;pointer-events:none}.hm-c{background:#fc0;box-shadow:0 0 4px #fc0}';
+        document.head.appendChild(style);
+
+        heatmapContainer = document.createElement('div');
+        heatmapContainer.id = 'heatmapContainer';
+        heatmapContainer.style.cssText = 'position:fixed;right:0;top:60px;bottom:60px;width:18px;pointer-events:none;z-index:99999;';
+        document.body.appendChild(heatmapContainer);
+        existing = heatmapContainer;
+    }
+
+    if (!searchResults || !searchResults.length) {
+        existing.style.display = 'none';
+        return;
+    }
+
+    existing.style.display = 'block';
+
+    let pageOffsets = {};
+    let docH = 0;
+    for (let i = 1; i <= totalPages; i++) {
+        pageOffsets[i] = docH;
+        docH += ((pageHeights[i] || 792) * currentScale) + 32;
+    }
+
+    if (docH < 50) return;
+
+    const n = searchResults.length;
+    const currIdx = currentMatchIndex;
+    const viewH = existing.clientHeight || 500;
+
+    let html = '';
+    for (let i = 0; i < n; i++) {
+        const r = searchResults[i];
+        if (!r || !r.page) continue;
+
+        const top = pageOffsets[r.page] || 0;
+        const y = top + (r.y || 0) * currentScale;
+        const pos = Math.max(0, Math.min(viewH - 4, (y / docH) * viewH));
+        const cls = i === currIdx ? 'hm-c' : 'hm';
+
+        html += '<div class="' + cls + '" style="top:' + pos + 'px"></div>';
+    }
+
+    existing.innerHTML = html;
+}
+
+function showSearchOverlay() {
+    if (!searchOverlay) initSearchOverlay();
+    searchOverlay.classList.add('visible');
+    searchOverlayInput.value = '';
+    searchOverlayInput.focus();
+    customSearchResults = [];
+    customSearchIndex = 0;
+    searchOverlayResults.textContent = '0 / 0';
+    closeMobileSidebar();
+}
+
+function closeSearchOverlay() {
+    if (searchOverlay) {
+        searchOverlay.classList.remove('visible');
+    }
+    clearCustomHighlights();
+    customSearchResults = [];
+    customSearchIndex = 0;
+}
+
+function performCustomSearch(query) {
+    if (!query || !pdfDoc) {
+        customSearchResults = [];
+        customSearchIndex = 0;
+        searchOverlayResults.textContent = '0 / 0';
+        clearCustomHighlights();
+        return;
+    }
+
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const localRegex = new RegExp(escaped, 'gi');
+    const results = [];
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        const cached = textPageCache[pageNum];
+        if (!cached) continue;
+
+        const pageText = cached.text;
+        let match;
+        while ((match = localRegex.exec(pageText)) !== null) {
+            results.push({
+                page: pageNum,
+                startIndex: match.index,
+                endIndex: match.index + match[0].length,
+                text: match[0]
+            });
+        }
+
+        localRegex.lastIndex = 0;
+    }
+
+    customSearchResults = results;
+    customSearchIndex = 0;
+
+    if (results.length > 0) {
+        searchOverlayResults.textContent = `1 / ${results.length}`;
+        customGoToMatch(0);
+    } else {
+        searchOverlayResults.textContent = '0 / 0';
+        clearCustomHighlights();
+    }
+}
+
+async function customGoToMatch(index) {
+    if (customSearchResults.length === 0) return;
+
+    customSearchIndex = ((index % customSearchResults.length) + customSearchResults.length) % customSearchResults.length;
+    searchOverlayResults.textContent = `${customSearchIndex + 1} / ${customSearchResults.length}`;
+
+    const result = customSearchResults[customSearchIndex];
+
+    await renderPageNow(result.page);
+    scrollToPage(result.page);
+    renderAllCustomHighlights();
+}
+
+function renderAllCustomHighlights() {
+    clearCustomHighlights();
+    if (customSearchResults.length === 0) return;
+
+    const currentResult = customSearchResults[customSearchIndex];
+    const currentPage = currentResult.page;
+
+    for (let i = 0; i < customSearchResults.length; i++) {
+        const result = customSearchResults[i];
+        if (result.page !== currentPage) continue;
+
+        const pageEl = document.getElementById('page-' + result.page);
+        if (!pageEl) continue;
+
+        const cached = textPageCache[result.page];
+        if (!cached || !cached.items) continue;
+
+        const coords = getTextCoords(cached, result.startIndex, result.endIndex);
+        if (!coords) continue;
+
+        const mark = document.createElement('div');
+        const isCurrent = (i === customSearchIndex);
+        mark.className = 'custom-highlight' + (isCurrent ? ' current' : '');
+        mark.style.left = (coords.startX * currentScale) + 'px';
+        mark.style.top = (coords.startY * currentScale) + 'px';
+        mark.style.width = ((coords.endX - coords.startX) * currentScale) + 'px';
+        mark.style.height = (coords.height * currentScale) + 'px';
+        pageEl.appendChild(mark);
+    }
+
+    const currentResultCoords = getTextCoords(textPageCache[currentPage], currentResult.startIndex, currentResult.endIndex);
+    if (currentResultCoords) {
+        const halfViewport = viewerScroll.clientHeight / 2;
+        const halfHeight = (currentResultCoords.height * currentScale) / 2;
+        const targetTop = pageEl.offsetTop + currentResultCoords.startY * currentScale - halfViewport + halfHeight;
+        viewerScroll.scrollTo({ top: Math.max(0, targetTop), behavior: smoothScrollEnabled ? 'smooth' : 'auto' });
+    }
+}
+
+function getTextCoords(cached, startIndex, endIndex) {
+    if (!cached || !cached.items) return null;
+
+    const viewHeight = cached.viewport.height;
+    let startY = 0, startX = 0, endY = 0, endX = 0, height = 0;
+
+    let charOffset = 0;
+    for (const item of cached.items) {
+        const itemStart = charOffset;
+        const itemEnd = charOffset + item.text.length;
+
+        if (startIndex >= itemStart && startIndex < itemEnd) {
+            const frac = (startIndex - itemStart) / item.text.length;
+            startX = item.transform[4] + frac * item.width;
+            startY = viewHeight - (item.transform[5] + item.height);
+            height = item.height;
+        }
+
+        if (endIndex > itemStart && endIndex <= itemEnd) {
+            const frac = (endIndex - itemStart) / item.text.length;
+            endX = item.transform[4] + frac * item.width;
+            endY = viewHeight - (item.transform[5] + item.height);
+            break;
+        }
+
+        charOffset = itemEnd;
+    }
+
+    if (endX === 0) endX = startX + 50;
+    if (endY === 0) endY = startY;
+
+    return { startX, startY, endX, endY, height };
+}
+
+function clearCustomHighlights() {
+    document.querySelectorAll('.custom-highlight').forEach(el => el.remove());
+}
+
+function customFindNext() {
+    if (customSearchResults.length > 0) {
+        customGoToMatch(customSearchIndex + 1);
+    }
+}
+
+function customFindPrev() {
+    if (customSearchResults.length > 0) {
+        customGoToMatch(customSearchIndex - 1);
+    }
+}
 
 // DOM refs
 const viewer = document.getElementById('pdfViewer');
@@ -99,6 +370,7 @@ function toggleTheme() {
 }
 
 let settingsOpen = false;
+let settingsJustToggled = false;
 
 function toggleSettings(e) {
     if (e) {
@@ -114,6 +386,8 @@ function toggleSettings(e) {
     
     if (existing) existing.remove();
     
+    settingsJustToggled = true;
+    
     const btn = document.getElementById('settingsBtn');
     const rect = btn.getBoundingClientRect();
     
@@ -127,7 +401,7 @@ function toggleSettings(e) {
     
     const themeBtn = document.createElement('button');
     const html = document.documentElement;
-    themeBtn.textContent = html.getAttribute('data-theme') === 'light' ? 'Dark Mode' : 'Light Mode';
+    themeBtn.innerHTML = '&#9728; ' + (html.getAttribute('data-theme') === 'light' ? 'Dark Mode' : 'Light Mode');
     themeBtn.onclick = toggleTheme;
     menu.appendChild(themeBtn);
     
@@ -151,30 +425,58 @@ function toggleSettings(e) {
     
     menu.appendChild(animateBtn);
     
+    // Layout selector
+    const layoutSection = document.createElement('div');
+    layoutSection.style.display = 'flex';
+    layoutSection.style.flexDirection = 'column';
+    layoutSection.style.gap = '4px';
+    layoutSection.style.marginTop = '4px';
+    layoutSection.style.paddingTop = '8px';
+    layoutSection.style.borderTop = '1px solid var(--grey-600)';
+    
+    const layoutLabel = document.createElement('span');
+    layoutLabel.className = 'toggle-label';
+    layoutLabel.textContent = 'Sidebar Layout:';
+    layoutLabel.style.fontSize = '0.75rem';
+    layoutSection.appendChild(layoutLabel);
+    
+    const layoutBtns = document.createElement('div');
+    layoutBtns.style.display = 'flex';
+    layoutBtns.style.gap = '4px';
+    
+    const layouts = [
+        { id: 'cards', label: 'Cards' },
+        { id: 'tree', label: 'Tree' }
+    ];
+    
+    layouts.forEach(l => {
+        const btn = document.createElement('button');
+        btn.textContent = l.label;
+        btn.style.flex = '1';
+        btn.style.padding = '6px 8px';
+        btn.style.fontSize = '0.75rem';
+        btn.style.border = '1px solid var(--grey-600)';
+        btn.style.borderRadius = '4px';
+        btn.style.background = currentLayout === l.id ? 'var(--green)' : 'transparent';
+        btn.style.color = currentLayout === l.id ? 'white' : 'var(--grey-300)';
+        btn.style.cursor = 'pointer';
+        btn.onclick = () => {
+            settingsJustToggled = true;
+            setLayout(l.id);
+            closeSettingsMenu();
+        };
+        layoutBtns.appendChild(btn);
+    });
+    
+    layoutSection.appendChild(layoutBtns);
+    menu.appendChild(layoutSection);
+    
+    // OCR is disabled for now - hidden
+    /*
     const ocrBtn = document.createElement('button');
-    ocrBtn.className = 'toggle-btn';
-    if (OCR.enabled) ocrBtn.classList.add('on');
-    ocrBtn.onclick = function() {
-        const newState = !ocrBtn.classList.contains('on');
-        ocrBtn.classList.toggle('on', newState);
-        OCR.setEnabled(newState);
-        ocrBtn.querySelector('.toggle-state').textContent = newState ? 'ON' : 'OFF';
-        if (objectUrls.length > 0) {
-            rescanAllDocuments();
-        }
-    };
+    ...
+    */
     
-    const ocrLabel = document.createElement('span');
-    ocrLabel.className = 'toggle-label';
-    ocrLabel.textContent = 'OCR Scan ';
-    ocrBtn.appendChild(ocrLabel);
-    
-    const ocrStateEl = document.createElement('span');
-    ocrStateEl.className = 'toggle-state';
-    ocrStateEl.textContent = OCR.enabled ? 'ON' : 'OFF';
-    ocrBtn.appendChild(ocrStateEl);
-    
-    menu.appendChild(ocrBtn);
     document.body.appendChild(menu);
     
     setTimeout(() => {
@@ -185,6 +487,10 @@ function toggleSettings(e) {
 function closeSettingsOnClickOutside(e) {
     const menu = document.getElementById('settingsMenu');
     const btn = document.getElementById('settingsBtn');
+    if (settingsJustToggled) {
+        settingsJustToggled = false;
+        return;
+    }
     if (menu && !menu.contains(e.target) && e.target !== btn) {
         menu.remove();
         settingsOpen = false;
@@ -197,6 +503,20 @@ function toggleAnimate() {
     localStorage.setItem('pdf_smooth_scroll', smoothScrollEnabled);
     const label = document.querySelector('.toggle-state');
     if (label) label.textContent = smoothScrollEnabled ? 'ON' : 'OFF';
+}
+
+function setLayout(layout) {
+    currentLayout = layout;
+    localStorage.setItem('pdf_layout', layout);
+    renderResultsArea();
+}
+
+function closeSettingsMenu() {
+    const menu = document.getElementById('settingsMenu');
+    if (menu) {
+        menu.remove();
+        settingsOpen = false;
+    }
 }
 
 (function() {
@@ -217,30 +537,32 @@ function updateStats() {
 }
 
 function clearAllResults() {
-    if (confirm("Clear all scanned results and start fresh?")) {
-        resultsArea.innerHTML = '<h1 class="status-msg">&#10548;</h1><h1 class="status-msg">Drop a folder to begin scanning</h1>';
-        statusBar.textContent = '';
-        objectUrls.forEach(url => URL.revokeObjectURL(url));
-        objectUrls = [];
-        totalMatchesFound = 0;
-        totalDocsFound = 0;
-        updateStats();
+    resultsArea.innerHTML = '<h1 class="status-msg">&#10548;</h1><h1 class="status-msg">Drop a folder to begin scanning</h1>';
+    const viewerDropMsg = document.getElementById('viewerDropMsg');
+    if (viewerDropMsg) viewerDropMsg.style.display = 'block';
+    statusBar.textContent = '';
+    objectUrls.forEach(url => URL.revokeObjectURL(url));
+    objectUrls = [];
+    totalMatchesFound = 0;
+    totalDocsFound = 0;
+    docDataCache = {};
+    expandedTreeItems.clear();
+    updateStats();
 
-        pdfDoc = null;
-        currentDocUrl = "";
-        currentScale = 1.0;
-        currentPage = 1;
-        totalPages = 0;
-        viewer.innerHTML = '';
-        renderedPages.clear();
-        renderedScales = {};
-        pageHeights = {};
-        searchCache = {};
-        clearSearch();
-        currentScale = 1.0;
-        currentPage = 1;
-        textPageCache = {};
-    }
+    pdfDoc = null;
+    currentDocUrl = "";
+    currentScale = 1.0;
+    currentPage = 1;
+    totalPages = 0;
+    viewer.innerHTML = '';
+    renderedPages.clear();
+    renderedScales = {};
+    pageHeights = {};
+    searchCache = {};
+    clearSearch();
+    currentScale = 1.0;
+    currentPage = 1;
+    textPageCache = {};
 }
 
 async function loadPDF(fileUrl, keyword = "") {
@@ -251,6 +573,15 @@ async function loadPDF(fileUrl, keyword = "") {
         return;
     }
 
+    // Auto-expand current file in tree, collapse previous
+    if (currentLayout === 'tree' && currentDocUrl && currentDocUrl !== fileUrl) {
+        expandedTreeItems.delete(currentDocUrl);
+    }
+    if (currentLayout === 'tree' && fileUrl) {
+        expandedTreeItems.add(fileUrl);
+    }
+    
+    currentDocUrl = fileUrl; // Set current document URL early
     cancelBgRender();
 
     //destroy old pdf memory to be more efficient
@@ -305,7 +636,12 @@ async function loadPDF(fileUrl, keyword = "") {
         pageInput.max = totalPages;
         pageTotal.textContent = totalPages;
 
+        initHeatmap();
         startBgRender();
+
+        if (currentLayout === 'tree') {
+            renderResultsArea();
+        }
 
         if (keyword) {
             performSearch(keyword);
@@ -351,16 +687,40 @@ async function setupVirtualPages() {
     setupPageObserver();
 }
 
+let renderPageDebounce = null;
+
 function setupPageObserver() {
+    if (pageObserver) {
+        pageObserver.disconnect();
+    }
+
     pageObserver = new IntersectionObserver((entries) => {
+        if (renderPageDebounce) return;
+
+        const pagesToRender = [];
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const pageNum = parseInt(entry.target.dataset.pageNum);
                 if (pageNum && !isPageRendered(pageNum)) {
-                    renderPageNow(pageNum);
+                    pagesToRender.push(pageNum);
                 }
             }
         });
+
+        if (pagesToRender.length === 0) return;
+
+        renderPageDebounce = setTimeout(() => {
+            renderPageDebounce = null;
+            if (pagesToRender.length <= 3) {
+                pagesToRender.forEach(p => renderPageNow(p));
+            } else {
+                const mid = Math.floor(pagesToRender.length / 2);
+                pagesToRender.slice(0, mid).forEach(p => renderPageNow(p));
+                setTimeout(() => {
+                    pagesToRender.slice(mid).forEach(p => renderPageNow(p));
+                }, 50);
+            }
+        }, 20);
     }, { root: viewerScroll, rootMargin: "500px" });
 
     document.querySelectorAll('[id^="page-"]').forEach(el => {
@@ -420,67 +780,81 @@ async function renderPageNow(pageNum, forceScale = null) {
     renderedPages.add(pageNum);
     renderedScales[pageNum] = Math.max(renderedScales[pageNum] || 0, renderScale);
 
-    const page = await pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: effectiveScale });
+    try {
+        const page = await pdfDoc.getPage(pageNum);
+        const viewport = page.getViewport({ scale: effectiveScale });
+     
+        const el = document.getElementById('page-' + pageNum);
+        if (!el) return;
 
-    const el = document.getElementById('page-' + pageNum);
-    if (!el) return;
+        const displayWidth = viewport.width / dpr;
+        const displayHeight = viewport.height / dpr;
 
-    const displayWidth = viewport.width / dpr;
-    const displayHeight = viewport.height / dpr;
+        el.className = 'pdf-page';
+        el.textContent = '';
+        el.style.width = displayWidth + 'px';
+        el.style.height = displayHeight + 'px';
 
-    el.className = 'pdf-page';
-    el.textContent = '';
-    el.style.width = displayWidth + 'px';
-    el.style.height = displayHeight + 'px';
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.width = displayWidth + 'px';
+        canvas.style.height = displayHeight + 'px';
+        canvas.dataset.scale = renderScale;
 
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { alpha: false });
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    canvas.style.width = displayWidth + 'px';
-    canvas.style.height = displayHeight + 'px';
-    canvas.dataset.scale = renderScale;
+        const textContent = await page.getTextContent();
+        
+        const vp = page.getViewport({ scale: 1.0 });
+        let pageText = '';
+        const textItems = [];
+        for (const item of textContent.items) {
+            pageText += item.str;
+            textItems.push({
+                text: item.str,
+                transform: item.transform,
+                width: item.width,
+                height: item.height
+            });
+        }
+        textPageCache[pageNum] = { text: pageText, viewport: vp, items: textItems };
+        pageHeights[pageNum] = vp.height;
+        
+        const textLayerDiv = document.createElement('div');
+        textLayerDiv.className = 'textLayer';
+        textLayerDiv.style.width = displayWidth + 'px';
+        textLayerDiv.style.height = displayHeight + 'px';
+        
+        const textViewport = page.getViewport({ scale: renderScale });
+        pdfjsLib.renderTextLayer({
+            textContent: textContent,
+            container: textLayerDiv,
+            viewport: textViewport,
+            textDivs: []
+        });
+        
+        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+        
+        const existingCanvas = el.querySelector('canvas');
+        if (existingCanvas) {
+            existingCanvas.remove();
+        }
+        el.appendChild(canvas);
 
-    const textContent = await page.getTextContent();
-    
-    const vp = page.getViewport({ scale: 1.0 });
-    let pageText = '';
-    for (const item of textContent.items) {
-        pageText += item.str;
-    }
-    textPageCache[pageNum] = { text: pageText, viewport: vp };
-    pageHeights[pageNum] = vp.height;
-    
-    const textLayerDiv = document.createElement('div');
-    textLayerDiv.className = 'textLayer';
-    textLayerDiv.style.width = displayWidth + 'px';
-    textLayerDiv.style.height = displayHeight + 'px';
-    
-    const textViewport = page.getViewport({ scale: renderScale });
-    pdfjsLib.renderTextLayer({
-        textContent: textContent,
-        container: textLayerDiv,
-        viewport: textViewport,
-        textDivs: []
-    });
-    
-    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-    
-    const existingCanvas = el.querySelector('canvas');
-    if (existingCanvas) {
-        existingCanvas.remove();
-    }
-    el.appendChild(canvas);
+        const existingTextLayer = el.querySelector('.textLayer');
+        if (existingTextLayer) {
+            existingTextLayer.remove();
+        }
+        el.appendChild(textLayerDiv);
 
-    const existingTextLayer = el.querySelector('.textLayer');
-    if (existingTextLayer) {
-        existingTextLayer.remove();
-    }
-    el.appendChild(textLayerDiv);
-
-    if (searchResults.length > 0) {
-        renderHighlightsForPage(pageNum);
+        if (searchResults.length > 0) {
+            renderHighlightsForPage(pageNum);
+        }
+    } catch (err) {
+        renderedPages.delete(pageNum);
+        if (err.name !== 'RenderingCancelledException') {
+            console.warn('Render error:', err.message);
+        }
     }
 }
 
@@ -704,22 +1078,26 @@ function showSearchResults() {
     if (searchResults.length > 0) {
         navGroup.classList.add('active');
         navSep.style.display = '';
-        
+
         matchTotal.textContent = searchResults.length;
         matchInput.max = searchResults.length;
         matchInput.value = 1;
+        currentMatchIndex = 0;
         renderAllHighlights();
         populateKeywordSelect();
         updateSidebarBadge();
+        updateHeatmap();
         goToMatch(0);
     } else {
         navGroup.classList.remove('active');
-        navSep.style.display = 'none';
-        
+        navSep.style.display = '';
+
         matchTotal.textContent = '0';
         matchInput.value = '';
+        currentMatchIndex = -1;
         updateSidebarBadge();
         populateKeywordSelect();
+        updateHeatmap();
     }
 }
 
@@ -739,6 +1117,7 @@ function cycleSearch(query) {
             matchInput.value = currentMatchIndex + 1;
             renderAllHighlights();
             populateKeywordSelect();
+            updateHeatmap();
             goToMatch(currentMatchIndex);
         } else {
             navGroup.classList.remove('active');
@@ -833,12 +1212,14 @@ function updateSidebarBadge() {
 
 // ========== ZOOM ==========
 
-function setZoom(newScale) {
+function setZoom(newScale, force = false) {
     const clampedScale = Math.max(0.5, Math.min(4.0, newScale));
-    if (clampedScale === currentScale) return;
+    if (clampedScale === currentScale && !force) return;
 
     const oldScrollTop = viewerScroll.scrollTop;
     const oldScrollHeight = viewerScroll.scrollHeight;
+    const scaleRatio = clampedScale / currentScale;
+    const oldScale = currentScale;
 
     currentScale = clampedScale;
     updateZoomDisplay();
@@ -880,6 +1261,7 @@ function setZoom(newScale) {
         if (searchResults.length > 0) {
             renderAllHighlights();
         }
+        updateHeatmap();
     });
 }
 
@@ -897,7 +1279,7 @@ function zoomFit() {
 }
 
 function zoomActual() {
-    setZoom(1.0);
+    setZoom(1.0, true);
 }
 
 function scheduleHighResRender() {
@@ -1053,6 +1435,10 @@ viewerScroll.addEventListener('scroll', () => {
         }
         offsetY += h + 32;
     }
+
+    if (searchResults.length > 0) {
+        updateHeatmap();
+    }
 });
 
 // ========== MATCH NAVIGATION ==========
@@ -1063,6 +1449,7 @@ function goToMatch(index) {
     currentMatchIndex = ((index % searchResults.length) + searchResults.length) % searchResults.length;
     matchInput.value = currentMatchIndex + 1;
     updateSidebarBadge();
+    updateHeatmap();
 
     const result = searchResults[currentMatchIndex];
 
@@ -1076,6 +1463,7 @@ function goToMatch(index) {
 
         clearHighlights();
         renderAllHighlights();
+        updateHeatmap();
     });
 
     startPrerender();
@@ -1130,13 +1518,50 @@ function clearSearch() {
     matchInput.value = '';
     matchTotal.textContent = '0';
     updateSidebarBadge();
+    updateHeatmap();
 }
 
-// ========== MOBILE (disabled) ==========
+// ========== MOBILE ==========
+
+let mobileSidebarOpen = false;
 
 function closeMobileSidebar() {
-    sidebar.classList.remove('open');
+    const sidebar = document.getElementById('sidebar');
+    const viewer = document.querySelector('.viewer-container');
+    sidebar.classList.add('collapsed');
+    viewer.classList.add('sidebar-collapsed');
+    mobileSidebarOpen = false;
 }
+
+function openMobileSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const viewer = document.querySelector('.viewer-container');
+    sidebar.classList.remove('collapsed');
+    viewer.classList.remove('sidebar-collapsed');
+    mobileSidebarOpen = true;
+}
+
+function toggleMobileSidebar() {
+    if (mobileSidebarOpen) {
+        closeMobileSidebar();
+    } else {
+        openMobileSidebar();
+    }
+}
+
+function checkMobileLayout() {
+    const isMobile = window.innerWidth <= 700;
+    const toggleBtn = document.querySelector('.mobile-toggle-sidebar');
+    if (toggleBtn) {
+        toggleBtn.style.display = isMobile ? 'block' : 'none';
+    }
+    if (isMobile && !mobileSidebarOpen) {
+        closeMobileSidebar();
+    }
+}
+
+window.addEventListener('resize', checkMobileLayout);
+document.addEventListener('DOMContentLoaded', checkMobileLayout);
 
 // ========== TOUCH ZOOM ==========
 
@@ -1192,6 +1617,20 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         zoomOut();
     }
+    if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        showSearchOverlay();
+    }
+    if (e.key === 'F3' && !e.shiftKey) {
+        e.preventDefault();
+        showSearchOverlay();
+    }
+    if (e.key === 'F3' && e.shiftKey) {
+        e.preventDefault();
+        if (searchOverlay && searchOverlay.classList.contains('visible')) {
+            customFindPrev();
+        }
+    }
     if (e.key === 'g' && !e.ctrlKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
         e.preventDefault();
         pageInput.focus();
@@ -1201,17 +1640,39 @@ document.addEventListener('keydown', (e) => {
         pageInput.blur();
         matchInput.blur();
         closeMobileSidebar();
+        closeSearchOverlay();
     }
 });
 
 // ========== DRAG & DROP ==========
 
-function renderCard(name, counts, url) {
+function getPathParts(file, baseFolderName) {
+    const fileName = file.relativePath || file.name;
+    
+    if (fileName.includes('/') || fileName.includes('\\')) {
+        const parts = fileName.split(/[/\\]/);
+        const name = parts.pop();
+        const folder = parts.join('/');
+        return { name, folder };
+    }
+    
+    return { name: fileName, folder: baseFolderName || basePath || '' };
+}
+
+function renderCard(fileName, counts, url, file = null) {
+    const { name: baseName, folder } = getPathParts(file, null);
+    docDataCache[url] = { name: baseName, folder, fullPath: fileName, counts, url };
+    
+    if (currentLayout === 'tree') {
+        renderResultsArea();
+        return;
+    }
+    
     const card = document.createElement('div');
     card.className = 'doc-card';
     card.dataset.url = url;
     card.onclick = () => { setActiveCard(card); loadPDF(url); closeMobileSidebar(); };
-    card.innerHTML = `<div class="doc-name">${name}</div>`;
+    card.innerHTML = `<div class="doc-name">${fileName}</div>`;
 
     const grid = document.createElement('div');
     grid.className = 'badge-grid';
@@ -1250,17 +1711,242 @@ function renderCard(name, counts, url) {
     resultsArea.appendChild(card);
 }
 
-function renderNoMatchCard(name, url) {
-    const card = document.createElement('div');
-    card.className = 'doc-card doc-card-minimal';
+function renderNoMatchCard(fileName, url, file = null) {
+    const { name: baseName, folder } = getPathParts(file, null);
+    const finalName = fileName;
+    docDataCache[url] = { name: baseName, folder, fullPath: finalName, counts: {}, url };
+    
+    if (currentLayout === 'tree') {
+        renderResultsArea();
+        return;
+    }
+    
+            const card = document.createElement('div');
+            card.className = 'doc-card doc-card-minimal' + (isActive ? ' active' : '');
     card.onclick = () => { setActiveCard(card); loadPDF(url); closeMobileSidebar(); };
-    card.innerHTML = `<div class="doc-name">${name}</div>`;
+    card.innerHTML = `<div class="doc-name">${fileName}</div>`;
     resultsArea.appendChild(card);
+}
+
+function renderTreeItem(doc) {
+    const item = document.createElement('div');
+    item.className = 'tree-item';
+    
+    const totalMatches = Object.values(doc.counts).reduce((a, b) => a + b, 0);
+    const isExpanded = expandedTreeItems.has(doc.url);
+    const isActive = doc.url === currentDocUrl;
+    
+    const header = document.createElement('div');
+    header.className = 'tree-header' + (isActive ? ' active' : '');
+
+    const arrow = document.createElement('span');
+    arrow.className = 'tree-arrow';
+    arrow.textContent = totalMatches > 0 ? (isExpanded ? '▼' : '▶') : '│';
+    arrow.onclick = (e) => {
+        e.stopPropagation();
+        if (totalMatches > 0) {
+            if (expandedTreeItems.has(doc.url)) {
+                expandedTreeItems.delete(doc.url);
+            } else {
+                expandedTreeItems.add(doc.url);
+            }
+            renderResultsArea();
+        }
+    };
+    header.appendChild(arrow);
+
+    const fileIcon = document.createElement('span');
+    fileIcon.className = 'tree-file-icon';
+    fileIcon.textContent = '📄';
+    header.appendChild(fileIcon);
+    
+    const name = document.createElement('span');
+    name.className = 'tree-name';
+    name.textContent = doc.name;
+    header.appendChild(name);
+    
+    if (totalMatches > 0) {
+        const count = document.createElement('span');
+        count.className = 'tree-count';
+        count.textContent = totalMatches;
+        header.appendChild(count);
+    }
+
+    header.onclick = () => {
+        if (totalMatches > 0) {
+            if (isExpanded) {
+                expandedTreeItems.delete(doc.url);
+            } else {
+                expandedTreeItems.add(doc.url);
+            }
+        }
+        setActiveCardFromUrl(doc.url);
+        loadPDF(doc.url);
+        closeMobileSidebar();
+        renderResultsArea();
+    };
+    
+    item.appendChild(header);
+    
+    if (isExpanded && totalMatches > 0) {
+        const children = document.createElement('div');
+        children.className = 'tree-children';
+        
+        KEYWORDS.forEach(k => {
+            const cnt = doc.counts[k] || 0;
+            if (cnt > 0) {
+                const child = document.createElement('div');
+                child.className = 'tree-child';
+                child.onclick = () => {
+                    if (doc.url === currentDocUrl) {
+                        cycleSearch(k);
+                    } else {
+                        loadPDF(doc.url, k);
+                    }
+                };
+                
+                const kw = document.createElement('span');
+                kw.className = 'tree-child-kw';
+                kw.textContent = k;
+                child.appendChild(kw);
+                
+                const c = document.createElement('span');
+                c.className = 'tree-child-count';
+                c.textContent = cnt;
+                child.appendChild(c);
+                
+                children.appendChild(child);
+            }
+        });
+        
+        item.appendChild(children);
+    }
+    
+    return item;
+}
+
+function renderResultsArea() {
+    resultsArea.innerHTML = '';
+    resultsArea.className = 'results-area' + (currentLayout === 'tree' ? ' tree-mode' : '');
+    
+    if (currentLayout === 'tree') {
+        const docs = Object.values(docDataCache);
+        
+        const folders = {};
+        docs.forEach(doc => {
+            const folder = doc.folder || '';
+            if (!folders[folder]) {
+                folders[folder] = [];
+            }
+            folders[folder].push(doc);
+        });
+        
+        const sortedFolders = Object.keys(folders).sort((a, b) => {
+            if (a === '') return 1;
+            if (b === '') return -1;
+            return a.localeCompare(b);
+        });
+        sortedFolders.forEach(folder => {
+            const folderDocs = folders[folder];
+            
+            if (!folder) {
+                const header = document.createElement('div');
+                header.className = 'tree-folder-header';
+                header.textContent = 'Files in root';
+                resultsArea.appendChild(header);
+            } else {
+                const header = document.createElement('div');
+                header.className = 'tree-folder-header';
+                header.textContent = folder;
+                resultsArea.appendChild(header);
+            }
+
+            folderDocs.sort((a, b) => a.name.localeCompare(b.name)).forEach(doc => {
+                resultsArea.appendChild(renderTreeItem(doc));
+            });
+        });
+        
+        if (docs.length === 0) {
+            resultsArea.innerHTML = '<h1 class="status-msg">&#10548;</h1><h1 class="status-msg">Drop a folder to begin scanning</h1>';
+        }
+    } else {
+        // Cards layout - re-render from docDataCache
+        const docs = Object.values(docDataCache);
+    docs.forEach(doc => {
+        const isActive = doc.url === currentDocUrl;
+        if (Object.keys(doc.counts).length > 0) {
+            const card = document.createElement('div');
+            card.className = 'doc-card' + (isActive ? ' active' : '');
+                card.dataset.url = doc.url;
+                card.onclick = () => { setActiveCard(card); loadPDF(doc.url); closeMobileSidebar(); };
+                card.innerHTML = `<div class="doc-name">${doc.name}</div>`;
+
+                const grid = document.createElement('div');
+                grid.className = 'badge-grid';
+
+                KEYWORDS.forEach(k => {
+                    const count = doc.counts[k] || 0;
+                    if (count > 0) {
+                        const b = document.createElement('div');
+                        b.className = 'badge';
+                        b.dataset.keyword = k;
+                        b.dataset.count = count;
+                        b.textContent = `${k}: ${count}`;
+                        b.onclick = (e) => {
+                            e.stopPropagation();
+                            setActiveCard(card);
+                            closeMobileSidebar();
+                            if (currentDocUrl === doc.url) {
+                                cycleSearch(k);
+                            } else {
+                                loadPDF(doc.url, k);
+                            }
+                        };
+                        grid.appendChild(b);
+                    }
+                });
+                card.appendChild(grid);
+                resultsArea.appendChild(card);
+            } else {
+                const card = document.createElement('div');
+                card.className = 'doc-card doc-card-minimal';
+                card.onclick = () => { setActiveCard(card); loadPDF(doc.url); closeMobileSidebar(); };
+                card.innerHTML = `<div class="doc-name">${doc.name}</div>`;
+                resultsArea.appendChild(card);
+            }
+        });
+        
+        if (docs.length === 0) {
+            resultsArea.innerHTML = '<h1 class="status-msg">&#10548;</h1><h1 class="status-msg">Drop a folder to begin scanning</h1>';
+        }
+    }
 }
 
 function setActiveCard(card) {
     document.querySelectorAll('.doc-card').forEach(c => c.classList.remove('active'));
     card.classList.add('active');
+}
+
+function setActiveCardFromUrl(url) {
+    document.querySelectorAll('.doc-card').forEach(c => c.classList.remove('active'));
+    const card = document.querySelector(`.doc-card[data-url="${url}"]`);
+    if (card) card.classList.add('active');
+    
+    document.querySelectorAll('.tree-item').forEach(item => {
+        const header = item.querySelector('.tree-header');
+        if (header) header.classList.remove('active');
+    });
+    const treeItem = [...document.querySelectorAll('.tree-item')].find(item => {
+        return item.querySelector('.tree-name').textContent === docDataCache[url]?.name;
+    });
+    if (treeItem) {
+        treeItem.querySelector('.tree-header').classList.add('active');
+    }
+
+    if (currentLayout === 'tree') {
+        expandedTreeItems.clear();
+        expandedTreeItems.add(url);
+    }
 }
 
 async function processFiles(files) {
@@ -1296,7 +1982,7 @@ async function processFiles(files) {
             statusBar.textContent = `${ocrPrefix}Scanning ${i + 1}/${files.length}: ${file.name}...`;
         }
         
-        await extractPdfText(arrayBuffer, file.name, url);
+        await extractPdfText(arrayBuffer, file.name, url, file);
         
         updateProgressMainThread();
         
@@ -1306,7 +1992,7 @@ async function processFiles(files) {
     }
 }
 
-async function extractPdfText(arrayBuffer, fileName, id) {
+async function extractPdfText(arrayBuffer, fileName, id, file = null) {
     try {
         const fakeDoc = {
             createElement: name => name === 'canvas' ? new OffscreenCanvas(1, 1) : null,
@@ -1338,7 +2024,16 @@ async function extractPdfText(arrayBuffer, fileName, id) {
                 for (const item of content.items) {
                     pageText += item.str;
                 }
-                pageTextData.push({ text: pageText, viewport: { width: vp.width, height: vp.height } });
+                const textItems = [];
+                for (const item of content.items) {
+                    textItems.push({
+                        text: item.str,
+                        transform: item.transform,
+                        width: item.width,
+                        height: item.height
+                    });
+                }
+                pageTextData.push({ text: pageText, viewport: { width: vp.width, height: vp.height }, items: textItems });
             }
         }
         
@@ -1372,10 +2067,10 @@ async function extractPdfText(arrayBuffer, fileName, id) {
         totalDocsFound++;
         
         if (totalMatches > 0) {
-            renderCard(fileName, counts, id);
+            renderCard(fileName, counts, id, file);
             totalMatchesFound += totalMatches;
         } else {
-            renderNoMatchCard(fileName, id);
+            renderNoMatchCard(fileName, id, file);
         }
         updateStats();
     } catch (err) {
@@ -1389,6 +2084,7 @@ function updateProgressMainThread() {
     progressBar.style.width = `${Math.round((processed / totalFiles) * 100)}%`;
     
     if (processed === totalFiles) {
+        renderResultsArea();
         if (totalMatchesFound === 0) {
             statusBar.textContent = "No matches found";
         } else {
@@ -1405,13 +2101,16 @@ async function handleDrop(e) {
             if (entry) entries.push(entry);
         }
     }
+    basePath = '';
     let filesToProcess = [];
     for (const entry of entries) {
         if (entry.isFile && entry.name.toLowerCase().endsWith('.zip')) {
             const zipFile = await new Promise((resolve) => entry.file(resolve));
+            basePath = zipFile.name.replace(/\.zip$/i, '');
             filesToProcess = filesToProcess.concat(await extractPdfsFromZip(zipFile));
         } else {
-            await traverseFileTree(entry, filesToProcess);
+            await traverseFileTree(entry, filesToProcess, '');
+            basePath = entry.name;
         }
     }
     
@@ -1457,13 +2156,18 @@ const viewerContainer = document.querySelector('.viewer-container');
 
 viewerContainer.addEventListener('drop', handleDrop);
 
-async function traverseFileTree(item, fileList) {
+let basePath = '';
+
+async function traverseFileTree(item, fileList, baseDir = '') {
+    const currentPath = baseDir ? baseDir + '/' + item.name : item.name;
     if (item.isFile && item.name.toLowerCase().endsWith('.pdf')) {
-        fileList.push(await new Promise((resolve) => item.file(resolve)));
+        const file = await new Promise((resolve) => item.file(resolve));
+        file.relativePath = currentPath;
+        fileList.push(file);
     } else if (item.isDirectory) {
         const dirReader = item.createReader();
         const entries = await new Promise((resolve) => dirReader.readEntries(resolve));
-        for (let entry of entries) await traverseFileTree(entry, fileList);
+        for (let entry of entries) await traverseFileTree(entry, fileList, currentPath);
     }
 }
 
@@ -1473,6 +2177,7 @@ document.getElementById('folderInput').addEventListener('change', async (e) => {
         if (file.name.toLowerCase().endsWith('.zip')) {
             filesToProcess = filesToProcess.concat(await extractPdfsFromZip(file));
         } else if (file.name.toLowerCase().endsWith('.pdf')) {
+            file.relativePath = file.webkitRelativePath || file.name;
             filesToProcess.push(file);
         }
     }
@@ -1486,7 +2191,9 @@ async function extractPdfsFromZip(zipFile) {
     zip.forEach((path, entry) => {
         if (!entry.dir && path.toLowerCase().endsWith('.pdf')) {
             promises.push(entry.async("blob").then(blob => {
-                extracted.push(new File([blob], entry.name, { type: "application/pdf" }));
+                const file = new File([blob], path, { type: "application/pdf" });
+                file.relativePath = path;
+                extracted.push(file);
             }));
         }
     });
