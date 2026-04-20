@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pdf-scanner-v2';
+const CACHE_NAME = 'pdf-scanner-v6';
 const ASSETS = [
     './',
     './index.html',
@@ -27,15 +27,17 @@ self.addEventListener('install', event => {
                 return caches.open(CACHE_NAME).then(cache => {
                     console.log('[SW] Caching CDN assets');
                     return Promise.all(
-                        CDN_URLS.map(url => fetch(url, { mode: 'cors' })
-                            .then(response => {
-                                if (response.ok) {
-                                    cache.put(url, response);
-                                }
-                            })
+                        CDN_URLS.map(url =>
+                            fetch(url, { mode: 'cors' })
+                                .then(response => {
+                                    if (response.ok) {
+                                        cache.put(url, response);
+                                    }
+                                })
+                        )
                     ).catch(err => {
                         console.warn('[SW] CDN caching failed:', err);
-                    }));
+                    });
                 });
             })
             .then(() => self.skipWaiting())
@@ -69,7 +71,7 @@ self.addEventListener('fetch', event => {
 
                 return fetch(event.request)
                     .then(response => {
-                        if (!response || response.status !== 200 || response.type !== 'basic') {
+                        if (!response || response.status !== 200) {
                             return response;
                         }
 

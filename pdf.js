@@ -643,7 +643,7 @@ async function loadPDF(fileUrl, keyword = "") {
         pageInput.max = totalPages;
         pageTotal.textContent = totalPages;
 
-        initHeatmap();
+        updateHeatmap();
         startBgRender();
 
         if (currentLayout === 'tree') {
@@ -674,21 +674,31 @@ async function setupVirtualPages() {
         pageObserver = null;
     }
 
-    const firstPage = await pdfDoc.getPage(1);
-    const firstViewport = firstPage.getViewport({ scale: 1.0 });
-
+    const pagePromises = [];
     for (let i = 1; i <= totalPages; i++) {
-        const h = firstViewport.height;
-        pageHeights[i] = h;
+        pagePromises.push(pdfDoc.getPage(i));
+    }
+    const pages = await Promise.all(pagePromises);
+
+    const placeholders = [];
+    for (let i = 0; i < pages.length; i++) {
+        const pageNum = i + 1;
+        const page = pages[i];
+        const viewport = page.getViewport({ scale: 1.0 });
+        pageHeights[pageNum] = viewport.height;
 
         const placeholder = document.createElement('div');
         placeholder.className = 'page-placeholder';
-        placeholder.id = 'page-' + i;
-        placeholder.dataset.pageNum = i;
-        placeholder.style.width = firstViewport.width + 'px';
-        placeholder.style.height = h + 'px';
-        placeholder.textContent = `Page ${i}`;
-        viewer.appendChild(placeholder);
+        placeholder.id = 'page-' + pageNum;
+        placeholder.dataset.pageNum = pageNum;
+        placeholder.style.width = viewport.width + 'px';
+        placeholder.style.height = viewport.height + 'px';
+        placeholder.textContent = `Page ${pageNum}`;
+        placeholders.push(placeholder);
+    }
+
+    for (const p of placeholders) {
+        viewer.appendChild(p);
     }
 
     setupPageObserver();
@@ -1258,7 +1268,7 @@ function setZoom(newScale, force = false) {
         const newScrollHeight = viewerScroll.scrollHeight;
         const anchorFraction = oldScrollHeight > 0 ? oldScrollTop / oldScrollHeight : 0;
         const newScrollTop = anchorFraction * newScrollHeight;
-        viewerScroll.scrollTop = newScrollTop;
+        viewerScroll.scrollTop = newScrollTop + 30;
 
         clearHighlights();
         if (pageObserver) {
@@ -1388,9 +1398,14 @@ function nextPage() {
 }
 
 function scrollToPage(pageNum) {
+    const pageEl = document.getElementById('page-' + pageNum);
     let targetOffset = 0;
-    for (let i = 1; i < pageNum; i++) {
-        targetOffset += (pageHeights[i] * currentScale || 800) + 32;
+    if (pageEl) {
+        targetOffset = pageEl.offsetTop;
+    } else {
+        for (let i = 1; i < pageNum; i++) {
+            targetOffset += (pageHeights[i] * currentScale || 800) + 32;
+        }
     }
     const behavior = smoothScrollEnabled && !isNavigating ? 'smooth' : 'auto';
     isNavigating = true;
@@ -1427,20 +1442,31 @@ viewerScroll.addEventListener('scroll', () => {
 
     const scrollTop = viewerScroll.scrollTop;
     const containerHeight = viewerScroll.clientHeight;
+    const scrollHeight = viewerScroll.scrollHeight;
 
-    let offsetY = 0;
+    const midPoint = scrollTop + containerHeight / 2;
+
+    let detectedPage = null;
     for (let i = 1; i <= totalPages; i++) {
-        const h = (pageHeights[i] || 800) * currentScale;
-        const pageBottom = offsetY + h;
+        const pageEl = document.getElementById('page-' + i);
+        if (!pageEl) continue;
 
-        if (scrollTop + containerHeight / 2 < pageBottom) {
-            if (i !== currentPage) {
-                currentPage = i;
-                updatePageInfo();
-            }
+        const pageTop = pageEl.offsetTop;
+        const pageBottom = pageTop + pageEl.offsetHeight;
+
+        if (midPoint < pageBottom) {
+            detectedPage = i;
             break;
         }
-        offsetY += h + 32;
+    }
+
+    if (!detectedPage && scrollTop + containerHeight >= scrollHeight - 50) {
+        detectedPage = totalPages;
+    }
+
+    if (detectedPage && detectedPage !== currentPage) {
+        currentPage = detectedPage;
+        updatePageInfo();
     }
 
     if (searchResults.length > 0) {
@@ -1535,16 +1561,18 @@ let mobileSidebarOpen = false;
 function closeMobileSidebar() {
     const sidebar = document.getElementById('sidebar');
     const viewer = document.querySelector('.viewer-container');
+    sidebar.classList.remove('open');
     sidebar.classList.add('collapsed');
-    viewer.classList.add('sidebar-collapsed');
+    viewer.style.height = 'calc(100% - 44px)';
     mobileSidebarOpen = false;
 }
 
 function openMobileSidebar() {
     const sidebar = document.getElementById('sidebar');
     const viewer = document.querySelector('.viewer-container');
+    sidebar.classList.add('open');
     sidebar.classList.remove('collapsed');
-    viewer.classList.remove('sidebar-collapsed');
+    viewer.style.height = 'calc(100% - 44px)';
     mobileSidebarOpen = true;
 }
 
@@ -1558,12 +1586,16 @@ function toggleMobileSidebar() {
 
 function checkMobileLayout() {
     const isMobile = window.innerWidth <= 700;
+    const sidebar = document.getElementById('sidebar');
     const toggleBtn = document.querySelector('.mobile-toggle-sidebar');
+    const viewer = document.querySelector('.viewer-container');
     if (toggleBtn) {
         toggleBtn.style.display = isMobile ? 'block' : 'none';
     }
     if (isMobile && !mobileSidebarOpen) {
-        closeMobileSidebar();
+        sidebar.classList.add('collapsed');
+        sidebar.classList.remove('open');
+        viewer.style.height = 'calc(100% - 44px)';
     }
 }
 
