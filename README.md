@@ -1,8 +1,8 @@
- # pdf_scan_js
+ # KeyWord-PDF
 
-Scans a folder or zip of PDFs for a large list of keywords and jump between matches.
+Scans a folder or zip of .pdf and .docx files for a large list of keywords and jump between matches.
 
-<img src="https://codeberg.org/kvnhndrsn/pages/raw/branch/main/projects/pdf.png" height="200" align="middle">
+<img src="https://kvnhndrsn.github.io/projects/pdf.webp" height="200" align="middle">
 
 ## Install
 

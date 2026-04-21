@@ -12,10 +12,10 @@ function getFileType(filename) {
 function getFileIcon(filename) {
     const type = getFileType(filename);
     if (type === 'pdf') {
-        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="#e53935"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M9,13V19H7V13H9M15,15V19H13V15H15M11,11V19H9V11H11Z"/></svg>';
+        return '<img src="pdf.svg" width="16" height="16" alt="pdf">';
     }
     if (type === 'docx' || type === 'doc') {
-        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="#1976d2"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M9,13V19H7V13H9M15,15V19H13V15H15M11,11V19H9V11H11Z"/></svg>';
+        return '<img src="docx.svg" width="16" height="16" alt="docx">';
     }
     return '<svg width="16" height="16" viewBox="0 0 24 24" fill="#757575"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>';
 }
@@ -721,7 +721,7 @@ async function loadDocument(fileUrl, keyword = "") {
 async function loadDocxDoc(fileUrl, keyword = "") {
     if (currentDocUrl === fileUrl && docContentCache[fileUrl]) {
         if (keyword) {
-            performDocSearch(keyword);
+            cycleDocSearch(keyword);
         }
         return;
     }
@@ -762,7 +762,7 @@ async function loadDocxDoc(fileUrl, keyword = "") {
         startDocSearchComputation();
 
         if (keyword) {
-            performDocSearch(keyword);
+            cycleDocSearch(keyword);
         }
     } catch (err) {
         loaderFilename.textContent = 'Error loading document';
@@ -885,6 +885,45 @@ async function performDocSearch(query) {
     }
 }
 
+function cycleDocSearch(query) {
+    if (!currentDocUrl || !docContentCache[currentDocUrl]) return;
+
+    const cached = docContentCache[currentDocUrl];
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const localRegex = new RegExp(`\\b${escaped}\\b`, 'gi');
+    const text = cached.text;
+    const results = [];
+    let match;
+
+    while ((match = localRegex.exec(text)) !== null) {
+        results.push({
+            index: match.index,
+            text: match[0],
+            length: match[0].length
+        });
+    }
+
+    if (results.length === 0) return;
+
+    const wasSameQuery = (docSearchResults.length > 0 && docContentCache[currentDocUrl]?.lastQuery === query);
+    if (!wasSameQuery) {
+        docCurrentMatchIndex = 0;
+    } else {
+        docCurrentMatchIndex = (docCurrentMatchIndex + 1) % results.length;
+    }
+    docContentCache[currentDocUrl].lastQuery = query;
+
+    docSearchResults = results;
+
+    navGroup.classList.add('active');
+    navSep.style.display = '';
+    matchTotal.textContent = results.length;
+    matchInput.max = results.length;
+    matchInput.value = docCurrentMatchIndex + 1;
+    renderDocHighlights();
+    updateSidebarBadge();
+}
+
 function renderDocHighlights() {
     const container = viewer.querySelector('.doc-viewer');
     if (!container || !docOriginalHtml) return;
@@ -901,7 +940,7 @@ function renderDocHighlights() {
     const escapedMatch = matchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const searchRegex = new RegExp(escapedMatch, 'gi');
 
-    let marked = false;
+    let matchCount = 0;
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, null);
     const nodes = [];
     let node;
@@ -912,20 +951,18 @@ function renderDocHighlights() {
             searchRegex.lastIndex = 0;
             const span = document.createElement('span');
             span.innerHTML = textNode.textContent.replace(searchRegex, match => {
-                const isFirst = !marked;
-                marked = true;
-                return `<mark class="doc-highlight${isFirst ? ' current' : ''}">${match}</mark>`;
+                const isCurrent = (matchCount === docCurrentMatchIndex);
+                matchCount++;
+                return `<mark class="doc-highlight${isCurrent ? ' current' : ''}">${match}</mark>`;
             });
             textNode.parentNode.replaceChild(span, textNode);
         }
     }
 
-    setTimeout(() => {
-        const currentMark = container.querySelector('.doc-highlight.current');
-        if (currentMark) {
-            currentMark.scrollIntoView({ behavior: smoothScrollEnabled ? 'smooth' : 'auto', block: 'center' });
-        }
-    }, 50);
+    const currentMark = container.querySelector('.doc-highlight.current');
+    if (currentMark) {
+        currentMark.scrollIntoView({ behavior: smoothScrollEnabled ? 'smooth' : 'auto', block: 'center' });
+    }
 }
 
 function goToDocMatch(index) {
@@ -2036,7 +2073,7 @@ function renderCard(fileName, counts, url, file = null) {
                     if (type === 'pdf') {
                         cycleSearch(k);
                     } else {
-                        performDocSearch(k);
+                        cycleDocSearch(k);
                     }
                 } else {
                     loadDocument(url, k);
@@ -2098,7 +2135,7 @@ function renderTreeItem(doc) {
 
     const fileIcon = document.createElement('span');
     fileIcon.className = 'tree-file-icon';
-    fileIcon.textContent = getFileIcon(doc.name);
+    fileIcon.innerHTML = getFileIcon(doc.name);
     header.appendChild(fileIcon);
     
     const name = document.createElement('span');
@@ -2140,11 +2177,11 @@ function renderTreeItem(doc) {
                 child.className = 'tree-child';
                 child.onclick = () => {
                     if (doc.url === currentDocUrl) {
-                        const type = getFileType(doc.url);
+                        const type = doc.type;
                         if (type === 'pdf') {
                             cycleSearch(k);
                         } else {
-                            performDocSearch(k);
+                            cycleDocSearch(k);
                         }
                     } else {
                         loadDocument(doc.url, k);
@@ -2248,7 +2285,7 @@ function renderResultsArea() {
                             if (type === 'pdf') {
                                 cycleSearch(k);
                             } else {
-                                performDocSearch(k);
+                                cycleDocSearch(k);
                             }
                         } else {
                             loadDocument(doc.url, k);
