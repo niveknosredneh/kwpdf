@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pdf-scanner-v6';
+const CACHE_NAME = 'pdf-scanner-v7';
 const ASSETS = [
     './',
     './index.html',
