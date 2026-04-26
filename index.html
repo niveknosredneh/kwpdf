@@ -13,7 +13,7 @@
     <script src="utils/keywords.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./utils/service-worker.js')
+            navigator.serviceWorker.register('./utils/service_worker.js')
                 .then(reg => console.log('[App] Service Worker registered'))
                 .catch(err => console.error('[App] Service Worker failed:', err));
         }
@@ -135,8 +135,11 @@
 </div>
 
 <script src="utils/ui.js"></script>
+    <script src="utils/keyword_regex.js"></script>
     <script src="utils/file_handler.js"></script>
-    <script src="utils/docx-engine.js"></script>
+    <script src="utils/docx_engine.js"></script>
+    <script src="utils/pdf_search.js"></script>
+    <script src="utils/pdf_renderer.js"></script>
     <script src="index.js"></script>
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
