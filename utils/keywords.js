@@ -7,7 +7,7 @@ let currentListName = DEFAULT_LIST_NAME;
 
 async function loadKeywords() {
     try {
-        const response = await fetch('keywords.json');
+        const response = await fetch('./keywords.json');
         const data = await response.json();
         
         KEYWORD_LISTS = data.lists || {};

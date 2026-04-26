@@ -1,24 +1,5 @@
 // ========== REGEX HELPERS ==========
 
-function getFileType(filename) {
-    const lower = filename.toLowerCase();
-    if (lower.endsWith('.pdf')) return 'pdf';
-    if (lower.endsWith('.docx')) return 'docx';
-    if (lower.endsWith('.doc')) return 'doc';
-    return null;
-}
-
-function getFileIcon(filename) {
-    const type = getFileType(filename);
-    if (type === 'pdf') {
-        return '<img src="icons/pdf.svg" width="16" height="16" alt="pdf">';
-    }
-    if (type === 'docx' || type === 'doc') {
-        return '<img src="icons/docx.svg" width="16" height="16" alt="docx">';
-    }
-    return '<svg width="16" height="16" viewBox="0 0 24 24" fill="#757575"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>';
-}
-
 window.cachedKeywordRegex = null;
 window.cachedKeywordList = null;
 
@@ -75,11 +56,7 @@ window.textPageCache = {};
 
 window.isNavigating = false;
 
-// ========== DOCX STATE ==========
-
-let docSearchResults = [];
-let docCurrentMatchIndex = -1;
-let docOriginalHtml = null;
+// ========== PDF STATE ==========
 
 // ========== PDF LOADING ==========
 
@@ -179,7 +156,7 @@ function getDocTypeFromUrl(url) {
         return dataCached.type;
     }
     if (dataCached?.name) {
-        return getFileType(dataCached.name);
+        return window.getFileType(dataCached.name);
     }
     if (window.docContentCache[url]?.type) {
         return window.docContentCache[url].type;
@@ -195,273 +172,10 @@ function loadDocument(fileUrl, keyword = "") {
     if (type === 'pdf') {
         loadPDF(fileUrl, keyword);
     } else if (type === 'docx' || type === 'doc') {
-        loadDocxDoc(fileUrl, keyword);
+        window.loadDocxDoc(fileUrl, keyword);
     } else {
         loadPDF(fileUrl, keyword);
     }
-}
-
-function loadDocxDoc(fileUrl, keyword = "") {
-    if (window.currentDocUrl === fileUrl && window.docContentCache[fileUrl]) {
-        if (keyword) {
-            window.cycleDocSearch(keyword);
-        }
-        return;
-    }
-
-    window.cancelBgRender();
-    window.currentDocUrl = fileUrl;
-    const cachedInfo = window.docContentCache[fileUrl];
-    window.currentDocType = cachedInfo?.type || getDocTypeFromUrl(fileUrl);
-
-    window.loader.style.display = 'flex';
-    window.loaderFilename.textContent = 'Loading document...';
-    window.loaderStatus.textContent = 'Parsing...';
-    window.loaderProgressFill.style.width = '30%';
-    window.viewer.innerHTML = '';
-    window.clearSearch();
-    window.textPageCache = {};
-
-    (async () => {
-        try {
-            const cached = window.docContentCache[fileUrl];
-            if (!cached) throw new Error('Document not found in cache');
-
-            window.loaderProgressFill.style.width = '70%';
-            window.loaderStatus.textContent = 'Rendering...';
-
-            renderDocContent(cached.html, cached.text);
-            window.loaderProgressFill.style.width = '100%';
-            window.loader.style.display = 'none';
-
-            window.totalPages = 1;
-            window.currentPage = 1;
-
-            window.updatePageInfo();
-            window.updateZoomDisplay();
-            window.pageInput.max = 1;
-            window.pageTotal.textContent = '1';
-
-            startDocSearchComputation();
-
-            if (keyword) {
-                window.cycleDocSearch(keyword);
-            }
-        } catch (err) {
-            window.loaderFilename.textContent = 'Error loading document';
-            window.loaderStatus.textContent = err.message;
-            window.loaderProgressFill.style.width = '0%';
-            console.error('Document load error:', err);
-        }
-    })();
-}
-
-function renderDocContent(html, plainText) {
-    window.viewer.innerHTML = '';
-    window.textPageCache[1] = { text: plainText, viewport: { width: 800, height: 600 }, items: [] };
-
-    if (!html) {
-        window.viewer.innerHTML = '<div style="padding:20px;">No content to display</div>';
-        return;
-    }
-
-    docOriginalHtml = html;
-
-    const container = document.createElement('div');
-    container.className = 'doc-viewer';
-    container.style.width = '100%';
-    container.style.maxWidth = '800px';
-    container.style.margin = '0 auto';
-    container.style.padding = '20px';
-    container.style.boxSizing = 'border-box';
-    container.style.fontFamily = 'Times New Roman, serif';
-    container.style.fontSize = '12pt';
-    container.style.lineHeight = '1.6';
-    container.style.background = 'white';
-    container.style.color = 'black';
-    container.style.position = 'relative';
-    container.innerHTML = html;
-
-    container.querySelectorAll('table').forEach(table => {
-        table.style.borderCollapse = 'collapse';
-        table.style.width = '100%';
-    });
-    container.querySelectorAll('td, th').forEach(cell => {
-        cell.style.border = '1px solid #000';
-        cell.style.padding = '4px';
-    });
-
-    window.viewer.appendChild(container);
-}
-
-// ========== DOC SEARCH ==========
-
-async function startDocSearchComputation() {
-    const cached = window.docContentCache[window.currentDocUrl];
-    if (!cached) return;
-
-    const combinedRegex = window.getKeywordRegex(window.KEYWORDS);
-    const text = cached.text;
-    const results = [];
-    let match;
-
-    while ((match = combinedRegex.exec(text)) !== null) {
-        if (match[0].length < 3) continue;
-        if (!/[a-zA-Z]/.test(match[0])) continue;
-        results.push({
-            index: match.index,
-            text: match[0],
-            length: match[0].length
-        });
-    }
-
-    const counts = {};
-    results.forEach(r => {
-        const lower = r.text.toLowerCase();
-        const key = window.KEYWORDS.find(k => k.toLowerCase() === lower) || lower;
-        counts[key] = (counts[key] || 0) + 1;
-    });
-
-    searchCache._docCounts = counts;
-    searchCache._docResults = results;
-    window.populateKeywordSelect();
-}
-
-window.performDocSearch = async function(query) {
-    if (!window.currentDocUrl || !window.docContentCache[window.currentDocUrl]) return;
-
-    const cached = window.docContentCache[window.currentDocUrl];
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const localRegex = new RegExp(`\\b${escaped}\\b`, 'gi');
-    const text = cached.text;
-    const results = [];
-    let match;
-
-    while ((match = localRegex.exec(text)) !== null) {
-        results.push({
-            index: match.index,
-            text: match[0],
-            length: match[0].length
-        });
-    }
-
-    docSearchResults = results;
-    docCurrentMatchIndex = 0;
-
-    if (results.length > 0) {
-        window.navGroup.classList.add('active');
-        window.navSep.style.display = '';
-        window.matchTotal.textContent = results.length;
-        window.matchInput.max = results.length;
-        window.matchInput.value = 1;
-        renderDocHighlights();
-        window.updateSidebarBadge();
-        goToDocMatch(0);
-    } else {
-        window.navGroup.classList.remove('active');
-        window.navSep.style.display = '';
-        window.matchTotal.textContent = '0';
-        window.matchInput.value = '';
-    }
-};
-
-window.cycleDocSearch = function(query) {
-    if (!window.currentDocUrl || !window.docContentCache[window.currentDocUrl]) return;
-
-    const cached = window.docContentCache[window.currentDocUrl];
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const localRegex = new RegExp(`\\b${escaped}\\b`, 'gi');
-    const text = cached.text;
-    const results = [];
-    let match;
-
-    while ((match = localRegex.exec(text)) !== null) {
-        results.push({
-            index: match.index,
-            text: match[0],
-            length: match[0].length
-        });
-    }
-
-    if (results.length === 0) return;
-
-    const wasSameQuery = (docSearchResults.length > 0 && window.docContentCache[window.currentDocUrl]?.lastQuery === query);
-    if (!wasSameQuery) {
-        docCurrentMatchIndex = 0;
-    } else {
-        docCurrentMatchIndex = (docCurrentMatchIndex + 1) % results.length;
-    }
-    window.docContentCache[window.currentDocUrl].lastQuery = query;
-
-    docSearchResults = results;
-
-    window.navGroup.classList.add('active');
-    window.navSep.style.display = '';
-    window.matchTotal.textContent = results.length;
-    window.matchInput.max = results.length;
-    window.matchInput.value = docCurrentMatchIndex + 1;
-    renderDocHighlights();
-    window.updateSidebarBadge();
-};
-
-function renderDocHighlights() {
-    const container = window.viewer.querySelector('.doc-viewer');
-    if (!container || !docOriginalHtml) return;
-
-    container.innerHTML = docOriginalHtml;
-
-    if (!docSearchResults.length) return;
-
-    const currentResult = docSearchResults[docCurrentMatchIndex];
-    if (!currentResult) return;
-
-    const plainText = window.docContentCache[window.currentDocUrl]?.text || '';
-    const matchText = plainText.substring(currentResult.index, currentResult.index + currentResult.length);
-    const escapedMatch = matchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const searchRegex = new RegExp(escapedMatch, 'gi');
-
-    let matchCount = 0;
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, null);
-    const nodes = [];
-    let node;
-    while (node = walker.nextNode()) nodes.push(node);
-
-    for (const textNode of nodes) {
-        if (searchRegex.test(textNode.textContent)) {
-            searchRegex.lastIndex = 0;
-            const span = document.createElement('span');
-            span.innerHTML = textNode.textContent.replace(searchRegex, match => {
-                const isCurrent = (matchCount === docCurrentMatchIndex);
-                matchCount++;
-                return `<mark class="doc-highlight${isCurrent ? ' current' : ''}">${match}</mark>`;
-            });
-            textNode.parentNode.replaceChild(span, textNode);
-        }
-    }
-
-    const currentMark = container.querySelector('.doc-highlight.current');
-    if (currentMark) {
-        currentMark.scrollIntoView({ behavior: window.smoothScrollEnabled ? 'smooth' : 'auto', block: 'center' });
-    }
-}
-
-function goToDocMatch(index) {
-    if (!docSearchResults.length) return;
-
-    docCurrentMatchIndex = ((index % docSearchResults.length) + docSearchResults.length) % docSearchResults.length;
-    window.matchInput.value = docCurrentMatchIndex + 1;
-    window.updateSidebarBadge();
-
-    const result = docSearchResults[docCurrentMatchIndex];
-    const plainText = window.docContentCache[window.currentDocUrl]?.text || '';
-    const textLen = plainText.length;
-    const targetFraction = result.index / textLen;
-    const scrollHeight = window.viewerScroll.scrollHeight - window.viewerScroll.clientHeight;
-    const targetTop = scrollHeight * targetFraction;
-
-    window.viewerScroll.scrollTo({ top: Math.max(0, targetTop), behavior: window.smoothScrollEnabled ? 'smooth' : 'auto' });
-
-    renderDocHighlights();
 }
 
 // ========== PAGE SETUP & RENDERING ==========

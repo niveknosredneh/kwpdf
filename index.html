@@ -7,13 +7,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=no">
     <title>PDF Scanner</title>
-    <link rel="stylesheet" href="pdf.css">
+    <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icons/favicon.ico">
-    <script src="keywords.js"></script>
+    <script src="utils/keywords.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./service-worker.js')
+            navigator.serviceWorker.register('./utils/service-worker.js')
                 .then(reg => console.log('[App] Service Worker registered'))
                 .catch(err => console.error('[App] Service Worker failed:', err));
         }
@@ -134,9 +134,10 @@
     </div>
 </div>
 
-<script src="ui.js"></script>
-    <script src="file_handler.js"></script>
-    <script src="pdf.js"></script>
+<script src="utils/ui.js"></script>
+    <script src="utils/file_handler.js"></script>
+    <script src="utils/docx-engine.js"></script>
+    <script src="index.js"></script>
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     </script>

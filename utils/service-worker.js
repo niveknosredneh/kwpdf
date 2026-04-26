@@ -1,12 +1,12 @@
-const CACHE_NAME = 'pdf-scanner-v7';
+const CACHE_NAME = 'pdf-scanner-v8';
 const ASSETS = [
-    './',
-    './index.html',
-    './pdf.js',
-    './pdf.css',
+    '../',
+    '../index.html',
+    '../index.js',
+    '../style.css',
     './keywords.js',
-    './keywords.json',
-    './favicon.ico'
+    '../keywords.json',
+    '../icons/favicon.ico'
 ];
 const CDN_URLS = [
     'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
@@ -87,7 +87,7 @@ self.addEventListener('fetch', event => {
                     })
                     .catch(() => {
                         if (event.request.destination === 'document') {
-                            return caches.match('./index.html');
+                            return caches.match('../index.html');
                         }
                     });
             })
