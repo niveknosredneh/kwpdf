@@ -41,5 +41,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await window.loadKeywords();
     }
     populateListSelector();
-    window.setupEventListeners();
+    if (typeof window.setupEventListeners === 'function') {
+        window.setupEventListeners();
+    } else {
+        console.error('setupEventListeners is not defined. Make sure ui.js is loaded correctly.');
+    }
 });

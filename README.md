@@ -16,6 +16,13 @@ python3 -m http.server 8895 &
 xdg-open http://localhost:8895
 ```
 
+## Imports
+
+* **[PDFjs](https://mozilla.github.io/pdf.js/)** - PDF parsing
+* **[jszip](https://stuk.github.io/jszip/)** - ZIP file support
+* **[Tesseract.js](https://tesseract.projectnaptha.com/)** - OCR support
+* **[mammoth.js](https://github.com/mwilliamson/mammoth.js/)** - DOCX to html
+
 ## Authors
 
 * **Kevin Matthew Henderson**

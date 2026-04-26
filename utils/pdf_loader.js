@@ -65,6 +65,49 @@ function loadPDF(fileUrl, keyword = "") {
                     window.textPageCache[i + 1] = cached.pages[i];
                 }
                 window.loaderProgressFill.style.width = '80%';
+                
+                if (window.isOcrEnabled(fileUrl)) {
+                    window.loaderStatus.textContent = 'Running OCR...';
+                    window.loaderProgressFill.style.width = '85%';
+                    
+                    try {
+                        const ocrText = await window.performOcrOnPdf(fileUrl, window.pdfDoc);
+                        if (ocrText && !window.ocrAbortController?.signal?.aborted) {
+                            window.setOcrTextForFile(fileUrl, ocrText);
+                            const keywords = window.KEYWORDS || [];
+                            const combinedRegex = window.getKeywordRegex(keywords);
+                            
+                            const counts = {};
+                            let totalMatches = 0;
+                            let match;
+                            const regex = new RegExp(combinedRegex.source, 'gi');
+                            while ((match = regex.exec(ocrText)) !== null) {
+                                if (match[0].length < 3) continue;
+                                if (!/[a-zA-Z]/.test(match[0])) continue;
+                                const lower = match[0].toLowerCase();
+                                const key = keywords.find(k => k.toLowerCase() === lower) || lower;
+                                counts[key] = (counts[key] || 0) + 1;
+                                totalMatches++;
+                            }
+                            
+                            cached.counts = cached.counts || {};
+                            for (const k in counts) {
+                                cached.counts[k] = (cached.counts[k] || 0) + counts[k];
+                            }
+                            
+                            console.log('[OCR] Found', totalMatches, 'keyword matches in OCR text');
+                            window.loaderProgressFill.style.width = '90%';
+                        }
+                    } catch (ocrErr) {
+                        if (ocrErr.name === 'AbortError') {
+                            window.loaderStatus.textContent = 'OCR cancelled';
+                            console.log('[OCR] Cancelled by user');
+                        } else {
+                            console.error('[OCR] Error:', ocrErr);
+                        }
+                    }
+                }
+                
                 await precomputeAllSearches();
             }
 

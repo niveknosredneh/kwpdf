@@ -631,7 +631,7 @@ console.log('[UI] renderNoMatchCard called for:', fileName);
     card.dataset.type = type;
     card.onclick = () => { window.setActiveCard(card); window.loadDocument(url); window.closeMobileSidebar(); };
     const iconHtml = window.getFileIcon(fileName);
-    const buttonHtml = `<button class="ocr-btn" data-url="${url}" title="Toggle OCR"><img src="./icons/ocr.svg" width="16" height="16" alt="OCR" onerror="this.onerror=null;console.log('OCR SVG failed to load');this.style.display='none'"></button>`;
+    const buttonHtml = `<button class="ocr-btn" data-url="${url}" title="Toggle OCR"><img src="icons/ocr.svg" width="16" height="16" alt="OCR" onerror="this.onerror=null;console.log('OCR SVG failed to load');this.style.display='none'"></button>`;
     card.innerHTML = `<div class="doc-name">${iconHtml} ${buttonHtml} ${fileName}</div>`;
     
     console.log('[UI] No-match card innerHTML:', card.innerHTML);
@@ -838,31 +838,7 @@ window.renderResultsArea = function() {
                 card.dataset.url = doc.url;
                 card.dataset.type = type;
                 card.onclick = () => { window.setActiveCard(card); window.loadDocument(doc.url); window.closeMobileSidebar(); };
-                const ocrBtn = `<button class="ocr-btn" data-url="${doc.url}" title="Toggle OCR"><img src="./icons/ocr.svg" width="16" height="16" alt="OCR" onerror="this.onerror=null;console.log('OCR SVG failed to load');this.style.display='none'"></button>`;
-                card.innerHTML = `<div class="doc-name">${window.getFileIcon(doc.name)} ${ocrBtn} ${doc.name}</div>`;
-
-                const ocrBtnElement = card.querySelector('.ocr-btn');
-                if (ocrBtnElement) {
-                    ocrBtnElement.onclick = (e) => {
-                        e.stopPropagation();
-                        const enabled = window.toggleOcr(doc.url);
-                        if (enabled) {
-                            ocrBtnElement.classList.add('ocr-enabled');
-                            window.loadDocument(doc.url);
-                        } else {
-                            ocrBtnElement.classList.remove('ocr-enabled');
-                            if (window.currentDocUrl === doc.url) {
-                                window.loadDocument(doc.url);
-                            }
-                        }
-                    };
-                }
-
-                const ocrEnabled = window.isOcrEnabled(doc.url);
-                if (ocrEnabled) {
-                    const btn = card.querySelector('.ocr-btn');
-                    if (btn) btn.classList.add('ocr-enabled');
-                }
+                card.innerHTML = `<div class="doc-name">${window.getFileIcon(doc.name)} ${doc.name}</div>`;
 
                 const grid = document.createElement('div');
                 grid.className = 'badge-grid';
@@ -893,6 +869,14 @@ window.renderResultsArea = function() {
                     }
                 });
                 card.appendChild(grid);
+                resultsArea.appendChild(card);
+            } else {
+                const card = document.createElement('div');
+                card.className = 'doc-card doc-card-minimal';
+                card.dataset.url = doc.url;
+                card.dataset.type = type;
+                card.onclick = () => { window.setActiveCard(card); window.loadDocument(doc.url); window.closeMobileSidebar(); };
+                card.innerHTML = `<div class="doc-name">${window.getFileIcon(doc.name)} ${doc.name}</div>`;
                 resultsArea.appendChild(card);
             }
         });
