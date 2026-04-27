@@ -134,6 +134,7 @@ window.extractPdfText = async function(arrayBuffer, fileName, id, file) {
         window.updateStats();
     } catch (err) {
         console.error('[PDF] Error processing PDF:', err);
+        window.renderNoMatchCard(fileName, id, file);
         window.updateProgressMainThread();
     }
 };
@@ -187,6 +188,7 @@ window.extractDocText = async function(arrayBuffer, fileName, id, file) {
         window.updateStats();
     } catch (err) {
         console.error('[DOC] Error processing document:', err);
+        window.renderNoMatchCard(fileName, id, file);
         window.updateProgressMainThread();
     }
 };
