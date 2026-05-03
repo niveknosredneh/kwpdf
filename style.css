@@ -601,11 +601,14 @@ body {
 .pdf-page canvas { display: block; }
 
 .textLayer {
-    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-    overflow: hidden; opacity: 0.2; line-height: 1;
+    position: absolute; top: 0; left: 0;
+    overflow: hidden; opacity: 1; line-height: 1.0; z-index: 2;
+    pointer-events: none;
 }
 .textLayer > span {
-    color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%;
+    color: transparent; position: absolute; white-space: pre; cursor: text;
+    transform-origin: 0% 0%; pointer-events: auto; user-select: text;
+    -webkit-user-select: text;
 }
 .textLayer ::selection { background: rgba(0, 0, 255, 0.3); }
 

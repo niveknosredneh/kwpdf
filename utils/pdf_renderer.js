@@ -191,14 +191,52 @@ window.renderPageNow = async function(pageNum, forceScale = null) {
             window.pageHeights[pageNum] = vp.height;
         }
         
-        // Skip text layer rendering - it's expensive and not needed for search highlighting
         await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-        
+
         const existingCanvas = el.querySelector('canvas');
         if (existingCanvas) {
             existingCanvas.remove();
         }
         el.appendChild(canvas);
+
+        // Create text layer for text selection
+        const existingTextLayer = el.querySelector('.textLayer');
+        if (existingTextLayer) {
+            existingTextLayer.remove();
+        }
+
+        const textLayer = document.createElement('div');
+        textLayer.className = 'textLayer';
+        textLayer.style.width = displayWidth + 'px';
+        textLayer.style.height = displayHeight + 'px';
+
+        const textContent = window.textPageCache[pageNum];
+        if (textContent && textContent.items) {
+            for (const item of textContent.items) {
+                const span = document.createElement('span');
+                span.textContent = item.text;
+
+                const transform = item.transform;
+                const scale = renderScale;
+
+                const x = transform[4] * scale;
+                const y = transform[5] * scale;
+                const fontSize = Math.sqrt(transform[0]*transform[0] + transform[1]*transform[1]) * scale;
+
+                span.style.position = 'absolute';
+                span.style.left = x + 'px';
+                span.style.top = (displayHeight - y - fontSize) + 'px';
+                span.style.fontSize = fontSize + 'px';
+                span.style.fontFamily = 'sans-serif';
+                span.style.whiteSpace = 'pre';
+                span.style.color = 'transparent';
+
+                textLayer.appendChild(span);
+            }
+        }
+
+        el.style.position = 'relative';
+        el.appendChild(textLayer);
 
         if (window.searchResults.length > 0) {
             window.renderHighlightsForPage(pageNum);
