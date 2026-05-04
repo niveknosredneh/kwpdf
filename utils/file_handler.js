@@ -347,35 +347,73 @@ window.rescanAllDocuments = async function() {
     
     for (let i = 0; i < window.objectUrls.length; i++) {
         const url = window.objectUrls[i];
-        const cached = window.docTextCache[url];
+        const fileName = url.split('/').pop() || `Document ${i + 1}`;
         
-        if (!cached) continue;
-        
-        const counts = {};
-        let fileTotalMatches = 0;
-        
-        for (let p = 0; p < cached.pages.length; p++) {
-            const text = cached.pages[p].text;
-            let match;
-            const regex = new RegExp(combinedRegex.source, 'gi');
-            while ((match = regex.exec(text)) !== null) {
-                if (match[0].length < 3) continue;
-                if (!/[a-zA-Z]/.test(match[0])) continue;
-                const lowerMatch = match[0].toLowerCase();
-                const originalKey = window.KEYWORDS.find(k => k.toLowerCase() === lowerMatch) || lowerMatch;
-                counts[originalKey] = (counts[originalKey] || 0) + 1;
-                fileTotalMatches++;
+        // Check PDF cache
+        const pdfCached = window.docTextCache[url];
+        if (pdfCached) {
+            const counts = {};
+            let fileTotalMatches = 0;
+            
+            if (combinedRegex) {
+                for (let p = 0; p < pdfCached.pages.length; p++) {
+                    const text = pdfCached.pages[p].text;
+                    let match;
+                    const regex = new RegExp(combinedRegex.source, 'gi');
+                    while ((match = regex.exec(text)) !== null) {
+                        if (match[0].length < 3) continue;
+                        if (!/[a-zA-Z]/.test(match[0])) continue;
+                        const lowerMatch = match[0].toLowerCase();
+                        const originalKey = window.KEYWORDS.find(k => k.toLowerCase() === lowerMatch) || lowerMatch;
+                        counts[originalKey] = (counts[originalKey] || 0) + 1;
+                        fileTotalMatches++;
+                    }
+                }
             }
+            
+            const displayName = pdfCached.fileName || fileName;
+            window.totalDocsFound++;
+            
+            if (fileTotalMatches > 0) {
+                window.renderCard(displayName, counts, url);
+                window.totalMatchesFound += fileTotalMatches;
+            } else {
+                window.renderNoMatchCard(displayName, url);
+            }
+            
+            const pct = Math.round(((i + 1) / window.objectUrls.length) * 100);
+            window.progressBar.style.width = pct + '%';
+            continue;
         }
         
-        const fileName = cached.fileName || `Document ${i + 1}`;
-        window.totalDocsFound++;
-        
-        if (fileTotalMatches > 0) {
-            window.renderCard(fileName, counts, url);
-            window.totalMatchesFound += fileTotalMatches;
-        } else {
-            window.renderNoMatchCard(fileName, url);
+        // Check DOCX cache
+        const docCached = window.docContentCache[url];
+        if (docCached) {
+            const counts = {};
+            let fileTotalMatches = 0;
+            
+            if (combinedRegex && docCached.text) {
+                const regex = new RegExp(combinedRegex.source, 'gi');
+                let match;
+                while ((match = regex.exec(docCached.text)) !== null) {
+                    if (match[0].length < 3) continue;
+                    if (!/[a-zA-Z]/.test(match[0])) continue;
+                    const lowerMatch = match[0].toLowerCase();
+                    const originalKey = window.KEYWORDS.find(k => k.toLowerCase() === lowerMatch) || lowerMatch;
+                    counts[originalKey] = (counts[originalKey] || 0) + 1;
+                    fileTotalMatches++;
+                }
+            }
+            
+            const displayName = docCached.fileName || fileName;
+            window.totalDocsFound++;
+            
+            if (fileTotalMatches > 0) {
+                window.renderCard(displayName, counts, url);
+                window.totalMatchesFound += fileTotalMatches;
+            } else {
+                window.renderNoMatchCard(displayName, url);
+            }
         }
         
         const pct = Math.round(((i + 1) / window.objectUrls.length) * 100);

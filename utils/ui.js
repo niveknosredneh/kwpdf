@@ -425,6 +425,47 @@ window.toggleSettings = function(e) {
     
     layoutSection.appendChild(layoutBtns);
     menu.appendChild(layoutSection);
+
+    const githubSection = document.createElement('div');
+    githubSection.style.marginTop = '4px';
+    githubSection.style.paddingTop = '8px';
+    githubSection.style.borderTop = '1px solid var(--grey-600)';
+    githubSection.style.display = 'flex';
+    githubSection.style.justifyContent = 'center';
+
+    const githubLink = document.createElement('a');
+    githubLink.href = 'https://github.com/kvnhndrsn/kwpdf';
+    githubLink.target = '_blank';
+    githubLink.rel = 'noopener noreferrer';
+    githubLink.style.display = 'flex';
+    githubLink.style.alignItems = 'center';
+    githubLink.style.gap = '6px';
+    githubLink.style.color = 'var(--grey-300)';
+    githubLink.style.textDecoration = 'none';
+    githubLink.style.fontSize = '0.8rem';
+    githubLink.style.transition = 'color 0.2s';
+
+    const githubIcon = document.createElement('img');
+    githubIcon.src = 'icons/github.svg';
+    githubIcon.alt = 'GitHub';
+    githubIcon.style.width = '16px';
+    githubIcon.style.height = '16px';
+    githubIcon.style.filter = 'brightness(0) invert(0.7)';
+
+    githubLink.onmouseenter = () => {
+        githubLink.style.color = 'var(--green-light)';
+        githubIcon.style.filter = 'brightness(0) invert(0.85) saturate(1.5) hue-rotate(80deg)';
+    };
+    githubLink.onmouseleave = () => {
+        githubLink.style.color = 'var(--grey-300)';
+        githubIcon.style.filter = 'brightness(0) invert(0.7)';
+    };
+
+    githubLink.appendChild(githubIcon);
+    githubLink.appendChild(document.createTextNode('source code on GitHub'));
+
+    githubSection.appendChild(githubLink);
+    menu.appendChild(githubSection);
     
     document.body.appendChild(menu);
     
