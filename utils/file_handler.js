@@ -36,8 +36,21 @@ window.totalFiles = 0;
 window._verboseInterval = null;
 
 window.startVerboseStatus = function(fileName) {
+    const keywords = window.KEYWORDS || [];
     const shortName = window.truncateFileName(fileName, 20);
-    window.statusBar.textContent = `Scanning ${shortName}...`;
+    if (keywords.length === 0) {
+        window.statusBar.textContent = `Scanning ${shortName}...`;
+        return;
+    }
+    let idx = 0;
+
+    function updateStatus() {
+        window.statusBar.textContent = `Scanning ${shortName} for "${keywords[idx % keywords.length]}"`;
+        idx++;
+        window._verboseRAF = requestAnimationFrame(updateStatus);
+    }
+
+    window._verboseRAF = requestAnimationFrame(updateStatus);
 };
 
 window.truncateFileName = function(name, maxLen) {
@@ -53,8 +66,10 @@ window.truncateFileName = function(name, maxLen) {
 };
 
 window.stopVerboseStatus = function() {
-    clearInterval(window._verboseInterval);
-    window._verboseInterval = null;
+    if (window._verboseRAF) {
+        cancelAnimationFrame(window._verboseRAF);
+        window._verboseRAF = null;
+    }
 };
 
 // ========== PROCESS FILES ==========
