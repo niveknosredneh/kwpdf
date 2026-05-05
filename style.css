@@ -587,8 +587,8 @@ body {
 
 .pdf-page {
     position: relative; margin: 16px auto; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white;
-    width: calc(var(--base-w, 600) * var(--pdf-scale, 1.0))px;
-    height: calc(var(--base-h, 800) * var(--pdf-scale, 1.0))px;
+    width: calc(var(--base-w, 600) * var(--pdf-scale, 1.0) * 1px);
+    height: calc(var(--base-h, 800) * var(--pdf-scale, 1.0) * 1px);
 }
 .pdf-page canvas { display: block; }
 
@@ -624,8 +624,8 @@ body {
     position: relative; margin: 16px auto; background: var(--page-bg);
     display: flex; align-items: center; justify-content: center;
     color: var(--grey-400); font-size: 0.85rem;
-    width: calc(var(--base-w, 600) * var(--pdf-scale, 1.0))px;
-    height: calc(var(--base-h, 800) * var(--pdf-scale, 1.0))px;
+    width: calc(var(--base-w, 600) * var(--pdf-scale, 1.0) * 1px);
+    height: calc(var(--base-h, 800) * var(--pdf-scale, 1.0) * 1px);
 }
 
 .nav-clear {

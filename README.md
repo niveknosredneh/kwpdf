@@ -1,6 +1,6 @@
  # KeyWord-PDF
 
-A simple viewer for .pdf and .docx files that automatically searches documents upon open for a large list of pre-defined keywords and allows you to quickly jump between matches.
+A simple viewer for .pdf and .docx files that automatically searches documents upon open for a large pre-defined list of keywords and allows you to quickly jump between matches.
 
 <img src="https://kvnhndrsn.github.io/projects/pdf.webp" height="400" align="middle">
 
@@ -10,6 +10,8 @@ A simple viewer for .pdf and .docx files that automatically searches documents u
 # clone repo 
 git clone https://github.com/kvnhndrsn/kwpdf
 cd kwpdf/  
+
+# nano keywords.json
 
 # start python web server and open page
 python3 -m http.server 8895 &   

@@ -36,17 +36,8 @@ window.totalFiles = 0;
 window._verboseInterval = null;
 
 window.startVerboseStatus = function(fileName) {
-    const keywords = window.KEYWORDS || [];
     const shortName = window.truncateFileName(fileName, 20);
-    if (keywords.length === 0) {
-        window.statusBar.textContent = `Scanning ${shortName}...`;
-        return;
-    }
-    let idx = 0;
-    window._verboseInterval = setInterval(() => {
-        window.statusBar.textContent = `Scanning ${shortName} for "${keywords[idx % keywords.length]}"`;
-        idx++;
-    }, 120);
+    window.statusBar.textContent = `Scanning ${shortName}...`;
 };
 
 window.truncateFileName = function(name, maxLen) {
