@@ -564,7 +564,14 @@ window.checkMobileLayout = function() {
 // ========== RESULTS RENDERING ==========
 
 window.getPathParts = function(file, baseFolderName) {
-    const fileName = file.relativePath || file.name;
+    let fileName;
+    if (file && (file.relativePath || file.name)) {
+        fileName = file.relativePath || file.name;
+    } else if (baseFolderName) {
+        fileName = baseFolderName;
+    } else {
+        fileName = '';
+    }
     
     if (fileName.includes('/') || fileName.includes('\\')) {
         const parts = fileName.split(/[/\\]/);

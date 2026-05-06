@@ -31,15 +31,68 @@ window.totalDocsFound = 0;
 window.processed = 0;
 window.totalFiles = 0;
 
+// ========== CACHE LIMITS ==========
+
+window.MAX_CACHE_SIZE_TOTAL = 500 * 1024 * 1024; // 500MB total
+window.MAX_CACHE_COUNT_PER_TYPE = 30; // 30 docs per PDF/DOCX cache
+window.totalCacheSize = 0; // Tracks combined size of docTextCache + docContentCache
+
+// ========== CACHE EVICTION ==========
+
+window.evictCaches = function() {
+  // Collect all non-current cache entries
+  const allEntries = [];
+
+  // Add PDF cache entries (skip current doc)
+  Object.entries(window.docTextCache).forEach(([key, entry]) => {
+    if (key !== window.currentDocUrl) {
+      allEntries.push({ key, entry, cacheType: 'pdf' });
+    }
+  });
+
+  // Add DOCX cache entries (skip current doc)
+  Object.entries(window.docContentCache).forEach(([key, entry]) => {
+    if (key !== window.currentDocUrl) {
+      allEntries.push({ key, entry, cacheType: 'docx' });
+    }
+  });
+
+  // Sort by oldest _lastAccess first
+  allEntries.sort((a, b) => a.entry._lastAccess - b.entry._lastAccess);
+
+   // Evict until limits are met
+  for (const { key, entry, cacheType } of allEntries) {
+    const pdfCount = Object.keys(window.docTextCache).length;
+    const docxCount = Object.keys(window.docContentCache).length;
+
+    const countOk = pdfCount <= window.MAX_CACHE_COUNT_PER_TYPE &&
+                    docxCount <= window.MAX_CACHE_COUNT_PER_TYPE;
+    const sizeOk = window.totalCacheSize <= window.MAX_CACHE_SIZE_TOTAL;
+
+    if (countOk && sizeOk) break;
+
+    // Evict entry
+    if (cacheType === 'pdf') {
+      delete window.docTextCache[key];
+    }
+    if (cacheType === 'docx') {
+      delete window.docContentCache[key];
+    }
+    window.totalCacheSize -= (entry._size || 0);
+  }
+};
+
 // ========== VERBOSE STATUS ==========
 
 window._verboseInterval = null;
 
 window.startVerboseStatus = function(fileName) {
     const keywords = window.KEYWORDS || [];
-    const shortName = window.truncateFileName(fileName, 20);
+    // Remove file extension for display
+    const nameWithoutExt = fileName.replace(/\.(pdf|docx?)$/i, '');
+    const shortName = window.truncateFileName(nameWithoutExt, 20);
     if (keywords.length === 0) {
-        window.statusBar.textContent = `Scanning ${shortName}...`;
+        window.statusBar.textContent = `Scanning ${shortName}..`;
         return;
     }
     let idx = 0;
@@ -55,14 +108,7 @@ window.startVerboseStatus = function(fileName) {
 
 window.truncateFileName = function(name, maxLen) {
     if (name.length <= maxLen) return name;
-    const dot = name.lastIndexOf('.');
-    const ext = dot >= 0 ? name.slice(dot) : '';
-    const base = dot >= 0 ? name.slice(0, dot) : name;
-    const gap = 3; // "..."
-    const extBudget = Math.min(ext.length, 10);
-    const baseBudget = maxLen - gap - extBudget;
-    if (baseBudget <= 0) return name.slice(0, maxLen - gap) + '...';
-    return base.slice(0, baseBudget) + '...' + ext;
+    return name.slice(0, maxLen - 2) + '..';
 };
 
 window.stopVerboseStatus = function() {
@@ -174,7 +220,16 @@ window.extractPdfText = async function(arrayBuffer, fileName, id, file) {
 
         console.log('[PDF] Processed', fileName, '- Found', totalMatches, 'matches');
 
-        window.docTextCache[id] = { totalPages: numPages, pages: pageTextData, fileName };
+        const pdfCacheEntry = {
+            totalPages: numPages,
+            pages: pageTextData,
+            fileName,
+            _lastAccess: Date.now(),
+            _size: JSON.stringify(pageTextData).length + fileName.length
+        };
+        window.docTextCache[id] = pdfCacheEntry;
+        window.totalCacheSize += pdfCacheEntry._size;
+        window.evictCaches();
         window.totalDocsFound++;
 
         window.renderCard(fileName, counts, id, file);
@@ -227,7 +282,17 @@ window.extractDocText = async function(arrayBuffer, fileName, id, file) {
 
         console.log('[DOC] Processed', fileName, '- Found', totalMatches, 'matches');
 
-        window.docContentCache[id] = { html: htmlContent, text: plainText, fileName, type };
+        const docxCacheEntry = {
+            html: htmlContent,
+            text: plainText,
+            fileName,
+            type,
+            _lastAccess: Date.now(),
+            _size: JSON.stringify({ html: htmlContent, text: plainText }).length + fileName.length
+        };
+        window.docContentCache[id] = docxCacheEntry;
+        window.totalCacheSize += docxCacheEntry._size;
+        window.evictCaches();
         window.totalDocsFound++;
 
         window.renderCard(fileName, counts, id, file);

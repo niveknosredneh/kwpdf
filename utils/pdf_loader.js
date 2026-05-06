@@ -59,8 +59,20 @@ function loadPDF(fileUrl, keyword = "") {
             window.loaderStatus.textContent = 'Extracting text content...';
             window.loaderProgressFill.style.width = '60%';
 
-            const cached = window.docTextCache[fileUrl];
+            let cached = window.docTextCache[fileUrl];
+            if (!cached) {
+                window.loaderFilename.textContent = 'Re-scanning PDF...';
+                const blobUrl = window.objectUrls.find(url => url === fileUrl);
+                if (blobUrl) {
+                    const response = await fetch(blobUrl);
+                    const arrayBuffer = await response.arrayBuffer();
+                    const fileName = window.docDataCache[fileUrl]?.name || 'Document';
+                    await window.extractPdfText(arrayBuffer, fileName, fileUrl, null);
+                    cached = window.docTextCache[fileUrl];
+                }
+            }
             if (cached) {
+                cached._lastAccess = Date.now();
                 for (let i = 0; i < cached.pages.length; i++) {
                     window.textPageCache[i + 1] = cached.pages[i];
                 }
