@@ -232,6 +232,7 @@ window.showSearchResults = function() {
         window.populateKeywordSelect();
         window.updateSidebarBadge();
         window.updateHeatmap();
+        window.startPrerender();
         window.goToMatch(0);
     } else {
         window.navGroup.classList.remove('active');
@@ -310,38 +311,6 @@ window.renderHighlightMark = function(result, index) {
 
 window.clearHighlights = function() {
     window.viewer.querySelectorAll('.highlight-mark').forEach(el => el.remove());
-};
-
-window.goToMatch = function(index) {
-    if (!window.searchResults.length) return;
-
-    window.currentMatchIndex = ((index % window.searchResults.length) + window.searchResults.length) % window.searchResults.length;
-    const result = window.searchResults[window.currentMatchIndex];
-
-    if (window.currentPage !== result.page) {
-        window.currentPage = result.page;
-        window.updatePageInfo();
-    }
-
-    const pageEl = document.getElementById('page-' + result.page);
-    if (!pageEl) return;
-
-    const pageTop = pageEl.offsetTop;
-    const scrollContainer = window.viewerScroll;
-    const targetTop = pageTop + (result.y * window.currentScale);
-
-    scrollContainer.scrollTo({
-        top: targetTop - 50,
-        behavior: window.smoothScrollEnabled ? 'smooth' : 'auto'
-    });
-
-    window.matchInput.value = window.currentMatchIndex + 1;
-    window.updateSidebarBadge();
-
-    const allMarks = window.viewer.querySelectorAll('.highlight-mark');
-    allMarks.forEach((mark, i) => {
-        mark.classList.toggle('current', i === window.currentMatchIndex);
-    });
 };
 
 window.updateHeatmap = function() {

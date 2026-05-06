@@ -147,9 +147,6 @@ window.renderPageNow = async function(pageNum, forceScale = null) {
 
     if (!window.pdfDoc) return;
 
-    window.renderedPages.add(pageNum);
-    window.renderedScales[pageNum] = Math.max(window.renderedScales[pageNum] || 0, renderScale);
-
     try {
         const page = await window.pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale: effectiveScale });
@@ -161,7 +158,7 @@ window.renderPageNow = async function(pageNum, forceScale = null) {
         const displayHeight = viewport.height / dpr;
 
         el.className = 'pdf-page';
-        el.textContent = '';
+        el.innerHTML = '<div class="page-loading"><div class="spinner"></div>Loading...</div>';
         // Set CSS custom properties for responsive sizing via --pdf-scale
         const vp1 = page.getViewport({ scale: 1.0 });
         el.style.setProperty('--base-w', vp1.width);
@@ -195,10 +192,15 @@ window.renderPageNow = async function(pageNum, forceScale = null) {
 
         await page.render({ canvasContext: ctx, viewport: viewport }).promise;
 
+        // Now mark as rendered after successful render
+        window.renderedPages.add(pageNum);
+        window.renderedScales[pageNum] = Math.max(window.renderedScales[pageNum] || 0, renderScale);
+
         const existingCanvas = el.querySelector('canvas');
         if (existingCanvas) {
             existingCanvas.remove();
         }
+        el.innerHTML = '';
         el.appendChild(canvas);
 
         // Create text layer for text selection
