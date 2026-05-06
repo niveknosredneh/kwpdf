@@ -251,23 +251,29 @@ window.handleDrop = async function(e) {
     }
     window.basePath = '';
     let filesToProcess = [];
+
+    const viewerMsg = document.getElementById('viewerDropMsg');
+    if (viewerMsg) viewerMsg.style.display = 'none';
+    const statusMsgs = window.resultsArea.querySelectorAll('.status-msg');
+    statusMsgs.forEach(el => el.remove());
+
     for (const entry of entries) {
         if (entry.isFile && entry.name.toLowerCase().endsWith('.zip')) {
+            window.statusBar.textContent = `Unzipping ${entry.name}...`;
+            window.progressBar.style.width = '0%';
             const zipFile = await new Promise((resolve) => entry.file(resolve));
             window.basePath = zipFile.name.replace(/\.zip$/i, '');
             filesToProcess = filesToProcess.concat(await window.extractAllFromZip(zipFile));
         } else {
+            window.statusBar.textContent = `Reading folder "${entry.name}"...`;
+            window.progressBar.style.width = '0%';
             await window.traverseFileTree(entry, filesToProcess, '');
             window.basePath = entry.name;
         }
     }
 
     if (filesToProcess.length === 0) {
-        const viewerMsg = document.getElementById('viewerDropMsg');
-        if (viewerMsg) viewerMsg.style.display = 'none';
-        const statusMsgs = window.resultsArea.querySelectorAll('.status-msg');
-        statusMsgs.forEach(el => el.remove());
-        window.statusBar.textContent = 'No supported files found in folder';
+        window.statusBar.textContent = 'No supported files found';
         window.progressBar.style.width = '0%';
     } else {
         window.processFiles(filesToProcess);
@@ -285,9 +291,18 @@ window.traverseFileTree = async function(item, fileList, baseDir = '') {
         const file = await new Promise((resolve) => item.file(resolve));
         file.relativePath = currentPath;
         fileList.push(file);
+        if (fileList.length % 10 === 0) {
+            window.statusBar.textContent = `Reading folder: found ${fileList.length} files...`;
+        }
     } else if (item.isDirectory) {
         const dirReader = item.createReader();
-        const entries = await new Promise((resolve) => dirReader.readEntries(resolve));
+        let entries = [];
+        // readEntries may return entries in batches; keep reading until empty
+        while (true) {
+            const batch = await new Promise((resolve) => dirReader.readEntries(resolve));
+            if (batch.length === 0) break;
+            entries.push(...batch);
+        }
         for (const entry of entries) await window.traverseFileTree(entry, fileList, currentPath);
     }
 };
@@ -295,8 +310,25 @@ window.traverseFileTree = async function(item, fileList, baseDir = '') {
 // ========== FOLDER INPUT ==========
 
 document.getElementById('folderInput').addEventListener('change', async (e) => {
+    const viewerMsg = document.getElementById('viewerDropMsg');
+    if (viewerMsg) viewerMsg.style.display = 'none';
+    const statusMsgs = window.resultsArea.querySelectorAll('.status-msg');
+    statusMsgs.forEach(el => el.remove());
+
     let filesToProcess = [];
-    for (const file of e.target.files) {
+    const items = Array.from(e.target.files);
+    const hasZip = items.some(f => f.name.toLowerCase().endsWith('.zip'));
+    const folderName = items.length > 0 ? (items[0].webkitRelativePath || '').split('/')[0] : '';
+
+    if (hasZip) {
+        window.statusBar.textContent = 'Processing ZIP file...';
+        window.progressBar.style.width = '0%';
+    } else if (folderName) {
+        window.statusBar.textContent = `Reading folder "${folderName}"...`;
+        window.progressBar.style.width = '0%';
+    }
+
+    for (const file of items) {
         const type = window.getFileType(file.name);
         if (file.name.toLowerCase().endsWith('.zip')) {
             filesToProcess = filesToProcess.concat(await window.extractAllFromZip(file));
@@ -305,31 +337,48 @@ document.getElementById('folderInput').addEventListener('change', async (e) => {
             filesToProcess.push(file);
         }
     }
-    window.processFiles(filesToProcess);
+
+    if (filesToProcess.length === 0) {
+        window.statusBar.textContent = 'No supported files found';
+        window.progressBar.style.width = '0%';
+    } else {
+        window.processFiles(filesToProcess);
+    }
 });
 
 // ========== ZIP EXTRACTION ==========
 
 window.extractAllFromZip = async function(zipFile) {
+    const sizeMB = (zipFile.size / (1024 * 1024)).toFixed(1);
+    window.statusBar.textContent = `Unzipping ${zipFile.name} (${sizeMB} MB)...`;
     const zip = await JSZip.loadAsync(zipFile);
-    const extracted = [];
-    const promises = [];
+
+    const entries = [];
     zip.forEach((path, entry) => {
-        if (!entry.dir) {
-            const type = window.getFileType(path);
-            if (type) {
-                let mimeType = 'application/pdf';
-                if (type === 'docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-                else if (type === 'doc') mimeType = 'application/msword';
-                promises.push(entry.async("blob").then(blob => {
-                    const file = new File([blob], path, { type: mimeType });
-                    file.relativePath = path;
-                    extracted.push(file);
-                }));
-            }
+        if (!entry.dir && window.getFileType(path)) {
+            entries.push({ path, entry });
         }
     });
-    await Promise.all(promises);
+
+    const total = entries.length;
+    const extracted = [];
+    let done = 0;
+
+    for (const { path, entry } of entries) {
+        const blob = await entry.async("blob");
+        let mimeType = 'application/pdf';
+        const type = window.getFileType(path);
+        if (type === 'docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        else if (type === 'doc') mimeType = 'application/msword';
+        const file = new File([blob], path, { type: mimeType });
+        file.relativePath = path;
+        extracted.push(file);
+        done++;
+        const pct = Math.round((done / total) * 100);
+        window.statusBar.textContent = `Unzipping ${zipFile.name}: ${done}/${total} files (${pct}%)`;
+        window.progressBar.style.width = pct + '%';
+    }
+
     return extracted;
 };
 

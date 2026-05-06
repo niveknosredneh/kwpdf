@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kwpdf-v2';
+const CACHE_NAME = 'kwpdf-v0.73';
 const LOCAL_ASSETS = [
     './index.html',
     './index.js',
