@@ -14,8 +14,8 @@
     --grey-700: #404040;
     --grey-800: #262626;
     --grey-900: #171717;
-    --highlight-color: rgba(63, 255, 0, 0.4);
-    --highlight-current: rgba(63, 255, 0, 0.6);
+    --highlight-color: rgba(255, 208, 20, 0.4);
+    --highlight-current: rgba(255, 208, 20, 0.6);
     --viewer-bg: var(--grey-800);
     --toolbar-bg: var(--grey-900);
     --page-bg: var(--grey-800);
@@ -38,8 +38,8 @@
     --grey-700: #e5e5e5;
     --grey-800: #f5f5f5;
     --grey-900: #fafafa;
-    --highlight-color: rgba(63, 255, 0, 0.3);
-    --highlight-current: rgba(63, 255, 0, 0.5);
+    --highlight-color: rgba(255, 208, 20, 0.3);
+    --highlight-current: rgba(255, 208, 20, 0.5);
     --viewer-bg: var(--grey-600);
     --toolbar-bg: var(--grey-700);
     --page-bg: var(--grey-600);
@@ -582,14 +582,14 @@ body {
 
 .custom-highlight {
     position: absolute;
-    background: rgba(255, 235, 59, 0.4);
+    background: var(--highlight-color);
     pointer-events: none;
     z-index: 5;
 }
 
 .custom-highlight.current {
-    background: rgba(255, 152, 0, 0.6);
-    box-shadow: 0 0 3px rgba(255, 152, 0, 0.8);
+    background: var(--highlight-current);
+    box-shadow: 0 0 3px rgba(255, 208, 20, 0.8);
 }
 
 #pdfViewer { margin: 0 auto; position: relative; }
@@ -619,14 +619,14 @@ body {
     pointer-events: none; z-index: 1;
 }
 .highlight-mark.current {
-    background: var(--highlight-current); outline: 2px solid rgba(63, 255, 0, 0.8); z-index: 2;
+    background: var(--highlight-current); outline: 2px solid rgba(255, 208, 20, 0.8); z-index: 2;
 }
 
 .doc-highlight {
-    background: rgba(63, 255, 0, 0.4); border-radius: 2px; padding: 0 2px;
+    background: rgba(255, 208, 20, 0.4); border-radius: 2px; padding: 0 2px;
 }
 .doc-highlight.current {
-    background: rgba(63, 255, 0, 0.6); outline: 2px solid rgba(63, 255, 0, 0.8);
+    background: rgba(255, 208, 20, 0.6); outline: 2px solid rgba(255, 208, 20, 0.8);
 }
 
 .page-placeholder {

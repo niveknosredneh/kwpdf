@@ -153,8 +153,20 @@ window.showSearchOverlay = function() {
     searchOverlay.classList.add('visible');
     searchOverlayInput.value = '';
     searchOverlayInput.focus();
-    customSearchResults = [];
-    customSearchIndex = 0;
+    searchOverlayInput.placeholder = window.currentDocUrl && window.docContentCache[window.currentDocUrl]
+        ? 'Search document... (Esc to close)'
+        : 'Search PDF... (Esc to close)';
+
+    if (window.currentDocUrl && window.docContentCache[window.currentDocUrl]) {
+        window.docSearchResults = [];
+        window.docCurrentMatchIndex = 0;
+        window.renderDocHighlights();
+    } else {
+        customSearchResults = [];
+        customSearchIndex = 0;
+        window.clearCustomHighlights();
+    }
+
     searchOverlayResults.textContent = '0 / 0';
     window.closeMobileSidebar();
 };
@@ -169,6 +181,23 @@ window.closeSearchOverlay = function() {
 };
 
 window.performCustomSearch = function(query) {
+    if (window.currentDocUrl && window.docContentCache[window.currentDocUrl]) {
+        if (!query) {
+            window.docSearchResults = [];
+            window.docCurrentMatchIndex = 0;
+            searchOverlayResults.textContent = '0 / 0';
+            window.renderDocHighlights();
+            return;
+        }
+        window.performDocSearch(query);
+        if (window.docSearchResults.length > 0) {
+            searchOverlayResults.textContent = `${window.docCurrentMatchIndex + 1} / ${window.docSearchResults.length}`;
+        } else {
+            searchOverlayResults.textContent = '0 / 0';
+        }
+        return;
+    }
+
     if (!query || !window.pdfDoc) {
         customSearchResults = [];
         customSearchIndex = 0;
@@ -302,12 +331,32 @@ window.clearCustomHighlights = function() {
 };
 
 window.customFindNext = function() {
+    if (window.currentDocUrl && window.docContentCache[window.currentDocUrl]) {
+        const query = searchOverlayInput.value;
+        if (query && window.docSearchResults.length > 0) {
+            window.cycleDocSearch(query);
+            if (window.docSearchResults.length > 0) {
+                searchOverlayResults.textContent = `${window.docCurrentMatchIndex + 1} / ${window.docSearchResults.length}`;
+            }
+        }
+        return;
+    }
+
     if (customSearchResults.length > 0) {
         window.customGoToMatch(customSearchIndex + 1);
     }
 };
 
 window.customFindPrev = function() {
+    if (window.currentDocUrl && window.docContentCache[window.currentDocUrl]) {
+        if (window.docSearchResults.length > 0) {
+            window.docCurrentMatchIndex = (window.docCurrentMatchIndex - 1 + window.docSearchResults.length) % window.docSearchResults.length;
+            window.goToDocMatch(window.docCurrentMatchIndex);
+            searchOverlayResults.textContent = `${window.docCurrentMatchIndex + 1} / ${window.docSearchResults.length}`;
+        }
+        return;
+    }
+
     if (customSearchResults.length > 0) {
         window.customGoToMatch(customSearchIndex - 1);
     }
@@ -627,6 +676,7 @@ window.renderCard = function(fileName, counts, url, file) {
         resultsArea.appendChild(card);
     }
 
+    card.className = 'doc-card';
     card.dataset.type = type;
     card.innerHTML = `<div class="doc-name">${window.getFileIcon(fileName)} ${fileName}</div>`;
 
@@ -691,6 +741,7 @@ window.renderNoMatchCard = function(fileName, url, file) {
         resultsArea.appendChild(card);
     }
 
+    card.className = 'doc-card doc-card-minimal';
     card.dataset.type = type;
     card.innerHTML = `<div class="doc-name">${window.getFileIcon(fileName)} ${fileName}</div>`;
 };
